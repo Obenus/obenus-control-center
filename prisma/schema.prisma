@@ -1,0 +1,138 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(USER)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  servers      Server[]
+  taskLogs     TaskLog[]
+  auditLogs    AuditLog[]
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model Server {
+  id             String    @id @default(uuid())
+  owner          User      @relation(fields: [userId], references: [id])
+  userId         String
+  name           String
+  hostname       String
+  ip             String
+  os             String    // 'ubuntu', 'debian', 'almalinux', etc.
+  connectionType String    @default("ssh")
+  sshPort        Int       @default(22)
+  sshUser        String    @default("root")
+  authMethod     AuthMethod
+  credential     String    // Encrypted password or SSH Private Key text
+  status         ServerStatus @default(ACTIVE)
+  notes          String?
+  tags           String?   // JSON stringified array
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  taskLogs       TaskLog[]
+  metricHistory  MetricHistory[]
+  triggers       ServerTrigger[]
+}
+
+model MetricHistory {
+  id        String   @id @default(uuid())
+  server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serverId  String
+  cpu       Float
+  ram       Float
+  disk      Float
+  createdAt DateTime @default(now())
+}
+
+model ServerTrigger {
+  id            String   @id @default(uuid())
+  server        Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serverId      String
+  metric        String   // 'CPU', 'RAM', 'DISK'
+  condition     String   // 'GT' (Greater Than), 'LT' (Less Than)
+  threshold     Float
+  durationMins  Int      @default(5)
+  actionTaskName String   // Name of the task to execute (more flexible than ID)
+  isEnabled     Boolean  @default(true)
+  lastTriggered DateTime?
+  createdAt     DateTime @default(now())
+}
+
+enum AuthMethod {
+  PASSWORD
+  KEY
+}
+
+enum ServerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model RemoteTask {
+  id              String   @id @default(uuid())
+  name            String
+  description     String
+  commandTemplate String   // SSH bash command
+  osTarget        String   // 'all', 'ubuntu', 'debian'
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model TaskLog {
+  id          String   @id @default(uuid())
+  server      Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serverId    String
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId      String?
+  taskName    String
+  status      TaskStatus @default(RUNNING)
+  stdout      String?  
+  stderr      String?  
+  exitCode    Int?
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  durationMs  Int?
+}
+
+enum TaskStatus {
+  RUNNING
+  SUCCESS
+  ERROR
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId      String?
+  action      String   // e.g. "CREATE_USER"
+  entity      String   // e.g. "User"
+  entityId    String?
+  details     String?  // JSON context
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+}
+
+model AppConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String   // JSON payload
+  updatedAt DateTime @updatedAt
+}

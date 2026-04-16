@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: ./deployment/Dockerfile
+    container_name: obenus_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - obenus_network
+
+  worker:
+    build:
+      context: .
+      dockerfile: ./deployment/Dockerfile.worker
+    container_name: obenus_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - obenus_network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: obenus_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: obenus
+      POSTGRES_PASSWORD: securepass
+      POSTGRES_DB: obenus_db
+    ports:
+      - "54321:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - obenus_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: obenus_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - obenus_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  obenus_network:
+    driver: bridge
