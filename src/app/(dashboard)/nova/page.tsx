@@ -61,6 +61,29 @@ const STATUS_STYLE: Record<string, string> = {
     UNKNOWN: "bg-slate-500/10 text-slate-500 border-slate-500/20",
 };
 
+/** Etiquetas cortas para caber en tabla sin scroll horizontal */
+const STATUS_SHORT: Record<string, string> = {
+    INSTALLED: "Actualizado",
+    UPDATE_AVAILABLE: "Pend. update",
+    NOT_INSTALLED: "Sin instalar",
+    INSTALLING: "Instalando",
+    UPDATING: "Actualizando",
+    INSTALL_ERROR: "Error install",
+    CONNECTION_ERROR: "Error SSH",
+    UNKNOWN: "Desconocido",
+};
+
+function formatCheck(iso: string | null) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleString("es-ES", {
+        timeZone: "Europe/Madrid",
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
 export default function NovaPage() {
     const [rows, setRows] = useState<NovaRow[]>([]);
     const [summary, setSummary] = useState<Summary | null>(null);
@@ -159,7 +182,7 @@ export default function NovaPage() {
     }
 
     return (
-        <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500">
+        <div className="max-w-[1600px] mx-auto space-y-8 animate-in fade-in duration-500">
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight text-white mb-2 font-display flex items-center gap-3">
@@ -309,36 +332,54 @@ export default function NovaPage() {
             </div>
 
             <div className="glass-card animated-border rounded-3xl overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse min-w-[1100px]">
-                        <thead>
-                            <tr className="border-b border-white/10 text-[10px] uppercase tracking-widest text-slate-500">
-                                <th className="p-4 w-10"></th>
-                                <th className="p-4 font-bold">Servidor</th>
-                                <th className="p-4 font-bold">Hostname</th>
-                                <th className="p-4 font-bold">IP</th>
-                                <th className="p-4 font-bold">SO</th>
-                                <th className="p-4 font-bold">Estado NOVA</th>
-                                <th className="p-4 font-bold">Versión</th>
-                                <th className="p-4 font-bold">SHA-256</th>
-                                <th className="p-4 font-bold">Disponible</th>
-                                <th className="p-4 font-bold">Última check</th>
-                                <th className="p-4 font-bold">Monitor</th>
-                                <th className="p-4 font-bold">Alertas</th>
-                                <th className="p-4 font-bold text-right">Acciones</th>
+                <table className="w-full table-fixed text-left border-collapse">
+                    <colgroup>
+                        <col className="w-[2.5%]" />
+                        <col className="w-[22%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[14%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[6%]" />
+                        <col className="w-[17.5%]" />
+                    </colgroup>
+                    <thead>
+                        <tr className="border-b border-white/10 text-[10px] uppercase tracking-wider text-slate-500">
+                            <th className="px-2 py-3"></th>
+                            <th className="px-2 py-3 font-bold">Servidor</th>
+                            <th className="px-2 py-3 font-bold">SO</th>
+                            <th className="px-2 py-3 font-bold">Estado</th>
+                            <th className="px-2 py-3 font-bold">Versión</th>
+                            <th className="px-2 py-3 font-bold">Check</th>
+                            <th className="px-2 py-3 font-bold">Monitor</th>
+                            <th className="px-2 py-3 font-bold">Alertas</th>
+                            <th className="px-2 py-3 font-bold text-right">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                        {filtered.length === 0 && (
+                            <tr>
+                                <td colSpan={9} className="py-16 text-center text-slate-600 text-xs uppercase tracking-widest">
+                                    Sin servidores en este filtro
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody className="text-sm">
-                            {filtered.length === 0 && (
-                                <tr>
-                                    <td colSpan={13} className="py-16 text-center text-slate-600 text-xs uppercase tracking-widest">
-                                        Sin servidores en este filtro
-                                    </td>
-                                </tr>
-                            )}
-                            {filtered.map((r) => (
+                        )}
+                        {filtered.map((r) => {
+                            const statusLabel =
+                                r.monitoringStatus === "legacy" && r.installStatus === "NOT_INSTALLED"
+                                    ? "Legacy"
+                                    : STATUS_SHORT[r.installStatus] || r.installStatusLabel;
+                            const needsUpdate = r.installStatus === "UPDATE_AVAILABLE";
+                            const shaTip = [
+                                r.installedSha256 ? `SHA local: ${r.installedSha256}` : null,
+                                r.officialSha256 ? `SHA oficial: ${r.officialSha256}` : null,
+                            ]
+                                .filter(Boolean)
+                                .join("\n");
+                            return (
                                 <tr key={r.serverId} className="border-b border-white/5 hover:bg-white/[0.02]">
-                                    <td className="p-4">
+                                    <td className="px-2 py-2.5 align-middle">
                                         <input
                                             type="checkbox"
                                             checked={selected.has(r.serverId)}
@@ -346,76 +387,111 @@ export default function NovaPage() {
                                             className="rounded border-slate-600 bg-transparent"
                                         />
                                     </td>
-                                    <td className="p-4">
-                                        <Link href={`/servers/${r.serverId}`} className="font-semibold text-white hover:text-sky-300">
-                                            {r.name}
-                                        </Link>
-                                        {r.locked && <span className="ml-2 text-[10px] text-amber-400">EN CURSO</span>}
+                                    <td className="px-2 py-2.5 align-middle min-w-0">
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                            <Link
+                                                href={`/servers/${r.serverId}`}
+                                                className="font-semibold text-white hover:text-sky-300 truncate"
+                                                title={r.name}
+                                            >
+                                                {r.name}
+                                            </Link>
+                                            {r.locked && (
+                                                <span className="shrink-0 text-[9px] text-amber-400 font-bold">…</span>
+                                            )}
+                                        </div>
+                                        <p
+                                            className="text-[10px] text-slate-500 font-mono truncate"
+                                            title={`${r.hostname} · ${r.ip}`}
+                                        >
+                                            {r.hostname}
+                                            <span className="text-slate-600"> · </span>
+                                            {r.ip}
+                                        </p>
                                     </td>
-                                    <td className="p-4 text-slate-400 font-mono text-xs">{r.hostname}</td>
-                                    <td className="p-4 text-slate-400 font-mono text-xs">{r.ip}</td>
-                                    <td className="p-4 text-slate-400 uppercase text-xs">{r.os}</td>
-                                    <td className="p-4">
-                                        <span className={`px-2 py-1 text-[10px] uppercase font-bold tracking-widest rounded border ${STATUS_STYLE[r.installStatus] || STATUS_STYLE.UNKNOWN}`}>
-                                            {r.monitoringStatus === "legacy" && r.installStatus === "NOT_INSTALLED"
-                                                ? "Instalación antigua"
-                                                : r.installStatusLabel}
+                                    <td className="px-2 py-2.5 align-middle text-slate-400 uppercase text-[11px] truncate" title={r.os}>
+                                        {r.os}
+                                    </td>
+                                    <td className="px-2 py-2.5 align-middle min-w-0">
+                                        <span
+                                            className={`inline-block max-w-full truncate px-1.5 py-0.5 text-[9px] uppercase font-bold tracking-wide rounded border ${STATUS_STYLE[r.installStatus] || STATUS_STYLE.UNKNOWN}`}
+                                            title={r.installStatusLabel}
+                                        >
+                                            {statusLabel}
                                         </span>
                                         {r.lastError && (
-                                            <p className="text-[10px] text-amber-400/90 mt-1 max-w-[220px] truncate" title={r.lastError}>
+                                            <p className="text-[9px] text-amber-400/90 mt-0.5 truncate" title={r.lastError}>
                                                 {r.lastError}
                                             </p>
                                         )}
                                     </td>
-                                    <td className="p-4 font-mono text-xs text-slate-300">{r.installedVersion || "—"}</td>
-                                    <td className="p-4 font-mono text-[10px] text-slate-500" title={r.installedSha256 || ""}>
-                                        {r.installedSha256 ? `${r.installedSha256.slice(0, 10)}…` : "—"}
+                                    <td
+                                        className="px-2 py-2.5 align-middle font-mono text-[11px] text-slate-300 whitespace-nowrap"
+                                        title={shaTip || undefined}
+                                    >
+                                        {r.installedVersion || "—"}
+                                        {needsUpdate && (
+                                            <span className="text-amber-400"> → {r.officialVersion}</span>
+                                        )}
                                     </td>
-                                    <td className="p-4 font-mono text-xs text-sky-300/80">{r.officialVersion}</td>
-                                    <td className="p-4 text-slate-500 text-xs">
-                                        {r.lastCheckedAt
-                                            ? new Date(r.lastCheckedAt).toLocaleString("es-ES", { timeZone: "Europe/Madrid" })
-                                            : "—"}
+                                    <td
+                                        className="px-2 py-2.5 align-middle text-slate-500 text-[11px] whitespace-nowrap"
+                                        title={
+                                            r.lastCheckedAt
+                                                ? new Date(r.lastCheckedAt).toLocaleString("es-ES", {
+                                                      timeZone: "Europe/Madrid",
+                                                  })
+                                                : undefined
+                                        }
+                                    >
+                                        {formatCheck(r.lastCheckedAt)}
                                     </td>
-                                    <td className="p-4 text-xs uppercase tracking-wide text-slate-400">{r.monitoringStatus}</td>
-                                    <td className="p-4 text-white font-semibold">{r.activeAlerts}</td>
-                                    <td className="p-4">
-                                        <div className="flex justify-end gap-1 flex-wrap">
+                                    <td className="px-2 py-2.5 align-middle text-[11px] uppercase tracking-wide text-slate-400 truncate">
+                                        {r.monitoringStatus}
+                                    </td>
+                                    <td className="px-2 py-2.5 align-middle text-white font-semibold text-sm">
+                                        {r.activeAlerts}
+                                    </td>
+                                    <td className="px-2 py-2.5 align-middle">
+                                        <div className="flex justify-end gap-1">
                                             <button
                                                 onClick={() => runAction("refresh", [r.serverId])}
-                                                className="px-2 py-1 text-[10px] rounded bg-white/5 border border-white/10 text-slate-300 hover:border-sky-500/40"
+                                                className="p-1.5 rounded bg-white/5 border border-white/10 text-slate-300 hover:border-sky-500/40"
+                                                title="Comprobar"
                                             >
-                                                Check
+                                                <RefreshCw className="w-3.5 h-3.5" />
                                             </button>
                                             {r.installStatus === "NOT_INSTALLED" || r.installStatus === "UNKNOWN" ? (
                                                 <button
                                                     onClick={() => runAction("install", [r.serverId])}
-                                                    className="px-2 py-1 text-[10px] rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300"
+                                                    className="p-1.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300"
+                                                    title="Instalar"
                                                 >
-                                                    Instalar
+                                                    <Download className="w-3.5 h-3.5" />
                                                 </button>
                                             ) : (
                                                 <button
                                                     onClick={() => runAction("update", [r.serverId])}
-                                                    className="px-2 py-1 text-[10px] rounded bg-indigo-500/15 border border-indigo-500/30 text-indigo-300"
+                                                    className="p-1.5 rounded bg-indigo-500/15 border border-indigo-500/30 text-indigo-300"
+                                                    title="Actualizar"
                                                 >
-                                                    Actualizar
+                                                    <Upload className="w-3.5 h-3.5" />
                                                 </button>
                                             )}
                                             <button
                                                 onClick={() => runAction("migrate", [r.serverId])}
-                                                className="px-2 py-1 text-[10px] rounded bg-amber-500/10 border border-amber-500/20 text-amber-300"
+                                                className="px-1.5 py-1 text-[9px] font-bold uppercase tracking-wide rounded bg-amber-500/10 border border-amber-500/20 text-amber-300"
                                                 title="Migrar instalación antigua"
                                             >
-                                                Migrar
+                                                Mig
                                             </button>
                                         </div>
                                     </td>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                            );
+                        })}
+                    </tbody>
+                </table>
             </div>
         </div>
     );
