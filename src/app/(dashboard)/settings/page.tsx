@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Shield } from "lucide-react";
 import { SettingsForms } from "./SettingsForms";
+import { NovaSettingsForm } from "./NovaSettingsForm";
 import { getNotificationConfig } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
@@ -20,16 +21,26 @@ export default async function SettingsPage() {
         );
     }
 
-    const { smtp, telegram } = await getNotificationConfig();
+    const { smtp } = await getNotificationConfig();
+
+    const safeSmtp = {
+        ...smtp,
+        pass: "",
+        hasPass: Boolean(smtp.pass),
+    };
 
     return (
         <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
             <div>
                 <h1 className="text-3xl font-bold tracking-tight text-white mb-2 font-display">Configuración Global</h1>
-                <p className="text-slate-400">Ajustes dinámicos de notificaciones (Anula valores predefinidos en Base de Datos).</p>
+                <p className="text-slate-400">
+                    SMTP para avisos del Hub. Telegram se configura solo en la sección NOVA (un único bot para monitorización y alertas del centro).
+                </p>
             </div>
 
-            <SettingsForms initialSmtp={smtp} initialTelegram={telegram} />
+            <SettingsForms initialSmtp={safeSmtp} />
+
+            <NovaSettingsForm />
 
             <p className="text-center text-xs text-slate-600 font-bold tracking-[0.2em] uppercase mt-12 pb-4">
                 Obenus Control Center - V1.0.0

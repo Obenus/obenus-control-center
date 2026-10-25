@@ -17,3 +17,28 @@ export const tasksQueue = new Queue('server-tasks', {
         attempts: 1,
     }
 });
+
+export type NovaJobName =
+    | 'nova-install'
+    | 'nova-update'
+    | 'nova-reinstall'
+    | 'nova-migrate'
+    | 'nova-refresh'
+    | 'nova-diagnose'
+    | 'nova-test-telegram'
+    | 'nova-configure'
+    | 'nova-refresh-all'
+    | 'nova-bulk-update';
+
+export async function enqueueNovaJob(
+    name: NovaJobName,
+    data: Record<string, unknown>,
+    opts?: { jobId?: string }
+) {
+    return tasksQueue.add(name, data, {
+        jobId: opts?.jobId,
+        removeOnComplete: 100,
+        removeOnFail: 50,
+        attempts: 1,
+    });
+}

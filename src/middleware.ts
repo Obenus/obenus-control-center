@@ -1,10 +1,40 @@
 import { withAuth } from "next-auth/middleware";
+import { NextResponse } from "next/server";
 
-export default withAuth({
-    pages: {
-        signIn: "/login",
+export default withAuth(
+    function middleware(req) {
+        const role = (req.nextauth.token as any)?.role;
+        const path = req.nextUrl.pathname;
+
+        // Rutas solo ADMIN
+        if (
+            (path.startsWith("/users") ||
+                path.startsWith("/nova") ||
+                path.startsWith("/api/users") ||
+                path.startsWith("/api/nova") ||
+                path.startsWith("/api/settings")) &&
+            role !== "ADMIN"
+        ) {
+            if (path.startsWith("/api/")) {
+                return new NextResponse("Forbidden", { status: 403 });
+            }
+            return NextResponse.redirect(new URL("/dashboard", req.url));
+        }
+
+        return NextResponse.next();
     },
-});
+    {
+        pages: { signIn: "/login" },
+        callbacks: {
+            authorized: ({ token, req }) => {
+                const path = req.nextUrl.pathname;
+                // next-auth callbacks under /api/auth must remain public
+                if (path.startsWith("/api/auth")) return true;
+                return !!token;
+            },
+        },
+    }
+);
 
 export const config = {
     matcher: [
@@ -12,6 +42,17 @@ export const config = {
         "/servers/:path*",
         "/settings/:path*",
         "/users/:path*",
-        "/monitoring/:path*"
+        "/monitoring/:path*",
+        "/nova/:path*",
+        "/api/servers/:path*",
+        "/api/servers",
+        "/api/tasks/:path*",
+        "/api/tasks",
+        "/api/users/:path*",
+        "/api/users",
+        "/api/settings/:path*",
+        "/api/settings",
+        "/api/nova/:path*",
+        "/api/nova",
     ],
 };

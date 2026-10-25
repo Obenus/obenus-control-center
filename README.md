@@ -71,10 +71,19 @@ El entorno se encuentra completamente dockerizado para facilitar su inicio.
 
 ---
 
+## 🛰️ Módulo NOVA
+
+Gestión centralizada del agente de monitorización autónomo. Ver [docs/NOVA.md](docs/NOVA.md).
+
+* Menú **NOVA** (administradores): inventario, instalación/actualización masiva.
+* Configuración → **NOVA**: Telegram cifrado y umbrales.
+* Ficha de servidor → panel **NOVA**.
+
 ## 🗺️ Roadmap Actual
 
 * **Fase 1-5 (Completadas):** Arquitectura, Dockerización, Autenticación, Ejecución SSH, Alertas Telegram/SMTP, Telemetría Visual y Triggers Autónomos.
-* **Fase Actual:** Versión 1.0 Estable (Producción).
+* **NOVA:** Administración centralizada del agente de monitorización.
+* **Fase Actual:** Versión 1.0 + NOVA.
 
 ---
 

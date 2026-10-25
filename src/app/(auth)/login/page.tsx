@@ -24,7 +24,8 @@ export default function LoginPage() {
         });
 
         if (res?.error) {
-            setError(res.error);
+            // Mensaje genérico: no filtrar detalles internos de autenticación
+            setError("Usuario o contraseña incorrectos");
             setLoading(false);
         } else {
             router.push("/dashboard");

@@ -6,10 +6,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { Bell, Zap, Sliders, History } from "lucide-react";
+import NovaServerPanel from "@/components/nova/NovaServerPanel";
+import ServerConnectionForm from "@/components/servers/ServerConnectionForm";
+import TaskHistoryTable from "@/components/tasks/TaskHistoryTable";
+import { useSession } from "next-auth/react";
 
 export default function ServerDetailsPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
+    const { data: session } = useSession();
     const { id } = use(params);
+    const isAdmin = (session?.user as any)?.role === "ADMIN";
     const [server, setServer] = useState<any>(null);
     const [logs, setLogs] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -68,12 +74,23 @@ export default function ServerDetailsPage({ params }: { params: Promise<{ id: st
         const sc = scheduleCrons[taskName] || "never";
         const cc = customCrons[taskName] || "0 * * * *";
         const finalCron = sc === "custom" ? cc : sc;
+        if (!finalCron || finalCron === "never") {
+            alert("Elige una frecuencia antes de programar");
+            setIsScheduling(null);
+            return;
+        }
 
-        await fetch(`/api/servers/${id}/tasks/schedule`, {
+        const res = await fetch(`/api/servers/${id}/tasks/schedule`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ taskName, cron: finalCron })
+            body: JSON.stringify({ taskName, cron: finalCron }),
         });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            alert(data.error || "No se pudo guardar la programación");
+            setIsScheduling(null);
+            return;
+        }
         const schReq = await fetch(`/api/servers/${id}/tasks/schedule`);
         if (schReq.ok) setSchedules(await schReq.json());
         setIsScheduling(null);
@@ -290,33 +307,36 @@ export default function ServerDetailsPage({ params }: { params: Promise<{ id: st
                         </div>
                     </div>
 
-                    <div className="glassmorphism rounded-2xl border border-white/5 overflow-hidden shadow-2xl">
-                        <div className="p-6 border-b border-white/5 bg-black/20 flex items-center justify-between">
-                            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                                <Terminal className="w-5 h-5 text-slate-400" /> Tareas Ejecutadas Recientemente
-                            </h2>
-                        </div>
-                        <table className="w-full text-left">
-                            <tbody>
-                                {logs.length === 0 && <tr><td className="p-8 text-center text-slate-500">Aún no hay ejecuciones.</td></tr>}
-                                {logs.map((log: any) => (
-                                    <tr key={log.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                                        <td className="py-4 px-6 text-sm font-semibold text-slate-200 tracking-tight">{log.taskName}</td>
-                                        <td className="py-4 px-6 text-xs text-slate-500 font-mono tracking-tight">{new Date(log.startedAt).toLocaleString("es-ES", { timeZone: "Europe/Madrid" })}</td>
-                                        <td className="py-4 px-6 text-xs font-mono text-right">
-                                            <span className={`px-2 py-1 rounded border overflow-hidden truncate ${log.exitCode === 0 ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400' : 'border-red-500/20 bg-red-500/10 text-red-400'
-                                                }`}>
-                                                Exit {log.exitCode} ({log.durationMs}ms)
-                                            </span>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                    <NovaServerPanel serverId={id} isAdmin={isAdmin} />
+
+                    <div className="glassmorphism rounded-2xl border border-white/5 overflow-hidden shadow-2xl p-6">
+                        <h2 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+                            <Terminal className="w-5 h-5 text-slate-400" /> Tareas Ejecutadas Recientemente
+                        </h2>
+                        <p className="text-xs text-slate-500 mb-4">Pulsa una fila para ver salida y motivo de error.</p>
+                        <TaskHistoryTable
+                            tasks={logs.map((log: any) => ({
+                                id: log.id,
+                                taskName: log.taskName,
+                                serverName: server?.name || "",
+                                status: log.status || (log.exitCode === 0 ? "SUCCESS" : "ERROR"),
+                                startedAt: typeof log.startedAt === "string" ? log.startedAt : new Date(log.startedAt).toISOString(),
+                                finishedAt: log.finishedAt || null,
+                                durationMs: log.durationMs,
+                                exitCode: log.exitCode,
+                                stdout: log.stdout,
+                                stderr: log.stderr,
+                            }))}
+                        />
                     </div>
                 </div>
 
                 <div className="space-y-6">
+                    <ServerConnectionForm
+                        server={server}
+                        onSaved={(s) => setServer({ ...server, ...s })}
+                    />
+
                     <div className="glassmorphism rounded-2xl p-6 border border-white/5 shadow-2xl relative overflow-hidden">
                         <h2 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
                             <History className="w-5 h-5 text-sky-400" /> Historial de Telemetría (24h)
@@ -417,44 +437,55 @@ export default function ServerDetailsPage({ params }: { params: Promise<{ id: st
                         <div className="space-y-2">
                             {remoteTasks.length === 0 && <p className="text-slate-500 text-sm p-4 text-center">No hay tareas para este OS.</p>}
                             {remoteTasks.map(t => (
-                                <button
+                                <div
                                     key={t.id}
-                                    disabled={taskRunning === t.name}
-                                    onClick={() => runTask(t.name)}
-                                    className="w-full text-left px-5 py-3.5 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-all flex items-center justify-between text-slate-300 hover:text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                                    className="w-full text-left px-5 py-3.5 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-indigo-500/40 transition-all text-slate-300 text-sm font-medium shadow-sm"
                                     title={t.description}
                                 >
-                                    <div className="flex flex-col">
-                                        <span className="tracking-tight mb-1">{t.name}</span>
-                                        <div className="flex flex-wrap gap-2 relative z-20 items-center mt-2 group justify-end sm:justify-start" onClick={e => e.stopPropagation()}>
-                                            <select
-                                                value={scheduleCrons[t.name] || "never"}
-                                                onChange={e => setScheduleCrons({ ...scheduleCrons, [t.name]: e.target.value })}
-                                                className="bg-black/50 border border-white/10 text-[10px] sm:text-xs px-2 sm:px-3 py-1.5 rounded-lg text-slate-300 font-mono focus:border-indigo-500 outline-none hover:bg-black/80 transition-colors cursor-pointer w-full sm:w-auto"
-                                            >
-                                                <option value="never">-- Nunca (Desactivado) --</option>
-                                                <option value="0 0 * * *">Diariamente (00:00)</option>
-                                                <option value="0 0 * * 0">Cada Domingo (00:00)</option>
-                                                <option value="0 0 1 * *">1er Día del Mes</option>
-                                                <option value="0 */12 * * *">Cada 12 Horas</option>
-                                                <option value="custom">Avanzado (Cron)</option>
-                                            </select>
-
-                                            {(scheduleCrons[t.name] || "never") === "custom" && (
-                                                <input type="text" placeholder="0 * * * *" value={customCrons[t.name] || "0 * * * *"} onChange={e => setCustomCrons({ ...customCrons, [t.name]: e.target.value })} className="bg-black/50 border border-white/10 text-[10px] w-full sm:w-24 px-2 py-1.5 rounded-lg text-slate-300 font-mono focus:border-indigo-500 outline-none" title="Formato Cron Avanzado" />
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="tracking-tight">{t.name}</span>
+                                        <button
+                                            type="button"
+                                            disabled={taskRunning === t.name}
+                                            onClick={() => runTask(t.name)}
+                                            className="shrink-0 px-3 py-1.5 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold tracking-wide hover:bg-indigo-500/40 disabled:opacity-50 flex items-center gap-2"
+                                        >
+                                            {taskRunning === t.name ? (
+                                                <div className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                                <Play className="w-3 h-3 fill-current" />
                                             )}
-
-                                            <button onClick={() => addSchedule(t.name)} disabled={isScheduling === t.name || (scheduleCrons[t.name] || "never") === "never"} className="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-[10px] px-3 py-1.5 rounded-lg hover:bg-indigo-500/40 transition-colors font-bold tracking-wide disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto">
-                                                {isScheduling === t.name ? "..." : "Programar"}
-                                            </button>
-                                        </div>
+                                            Ejecutar
+                                        </button>
                                     </div>
-                                    {taskRunning === t.name ? (
-                                        <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-                                    ) : (
-                                        <ArrowLeft className="w-4 h-4 text-slate-600 transition-colors rotate-180" />
-                                    )}
-                                </button>
+                                    <div className="flex flex-wrap gap-2 items-center mt-3">
+                                        <select
+                                            value={scheduleCrons[t.name] || "never"}
+                                            onChange={e => setScheduleCrons({ ...scheduleCrons, [t.name]: e.target.value })}
+                                            className="bg-black/50 border border-white/10 text-[10px] sm:text-xs px-2 sm:px-3 py-1.5 rounded-lg text-slate-300 font-mono focus:border-indigo-500 outline-none hover:bg-black/80 transition-colors cursor-pointer w-full sm:w-auto"
+                                        >
+                                            <option value="never">-- Nunca (Desactivado) --</option>
+                                            <option value="0 0 * * *">Diariamente (00:00)</option>
+                                            <option value="0 0 * * 0">Cada Domingo (00:00)</option>
+                                            <option value="0 0 1 * *">1er Día del Mes</option>
+                                            <option value="0 */12 * * *">Cada 12 Horas</option>
+                                            <option value="custom">Avanzado (Cron)</option>
+                                        </select>
+
+                                        {(scheduleCrons[t.name] || "never") === "custom" && (
+                                            <input type="text" placeholder="0 * * * *" value={customCrons[t.name] || "0 * * * *"} onChange={e => setCustomCrons({ ...customCrons, [t.name]: e.target.value })} className="bg-black/50 border border-white/10 text-[10px] w-full sm:w-24 px-2 py-1.5 rounded-lg text-slate-300 font-mono focus:border-indigo-500 outline-none" title="Formato Cron Avanzado" />
+                                        )}
+
+                                        <button
+                                            type="button"
+                                            onClick={() => addSchedule(t.name)}
+                                            disabled={isScheduling === t.name || (scheduleCrons[t.name] || "never") === "never"}
+                                            className="bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[10px] px-3 py-1.5 rounded-lg hover:bg-sky-500/30 transition-colors font-bold tracking-wide disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
+                                        >
+                                            {isScheduling === t.name ? "..." : "Programar"}
+                                        </button>
+                                    </div>
+                                </div>
                             ))}
                         </div>
 

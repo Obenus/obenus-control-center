@@ -50,6 +50,55 @@ model Server {
   taskLogs       TaskLog[]
   metricHistory  MetricHistory[]
   triggers       ServerTrigger[]
+  novaAgent      NovaAgent?
+}
+
+model NovaAgent {
+  id                 String            @id @default(uuid())
+  server             Server            @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  serverId           String            @unique
+  installStatus      NovaInstallStatus @default(UNKNOWN)
+  installedVersion   String?
+  installedSha256    String?
+  lastCheckedAt      DateTime?
+  lastRunAt          DateTime?
+  monitoringStatus   String?           // ok | degraded | unknown | error
+  activeAlerts       Int               @default(0)
+  modules            String?           // JSON: { linux, docker, plesk, s3 }
+  thresholds         String?           // JSON thresholds overlay
+  capabilities       String?           // JSON detected features
+  lastError          String?
+  lastOperationId    String?
+  operationLockUntil DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  operations         NovaOperation[]
+}
+
+model NovaOperation {
+  id         String     @id @default(uuid())
+  agent      NovaAgent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agentId    String
+  type       String     // install | update | reinstall | diagnose | refresh | test_telegram | configure | migrate
+  status     TaskStatus @default(RUNNING)
+  progress   String?
+  stdout     String?
+  stderr     String?
+  userId     String?
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  durationMs Int?
+}
+
+enum NovaInstallStatus {
+  NOT_INSTALLED
+  INSTALLED
+  UPDATE_AVAILABLE
+  INSTALLING
+  UPDATING
+  INSTALL_ERROR
+  CONNECTION_ERROR
+  UNKNOWN
 }
 
 model MetricHistory {

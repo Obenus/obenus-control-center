@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "tsx --test src/core/nova/novaService.test.ts",
+    "test:nova": "tsx --test src/core/nova/novaService.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

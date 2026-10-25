@@ -10,7 +10,8 @@ export default function NewServerPage() {
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         name: "", hostname: "", ip: "", os: "ubuntu",
-        sshPort: "22", sshUser: "root", authMethod: "KEY", credential: ""
+        sshPort: "22", sshUser: "root", authMethod: "KEY", credential: "",
+        installNova: true,
     });
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -24,7 +25,8 @@ export default function NewServerPage() {
         });
 
         if (res.ok) {
-            router.push("/servers");
+            const created = await res.json();
+            router.push(formData.installNova ? `/servers/${created.id}` : "/servers");
         } else {
             alert("Error al crear el servidor");
             setLoading(false);
@@ -142,15 +144,29 @@ export default function NewServerPage() {
                     </div>
                 </div>
 
-                <div className="pt-6 border-t border-slate-800/50 flex justify-end">
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl shadow-lg shadow-indigo-500/25 flex items-center gap-2 transition-colors font-medium border border-indigo-500/50 disabled:opacity-50"
-                    >
-                        {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-5 h-5" />}
-                        {loading ? "Guardando..." : "Guardar Servidor"}
-                    </button>
+                <div className="pt-6 border-t border-slate-800/50 space-y-4">
+                    <label className="flex items-start gap-3 text-sm text-slate-300 bg-sky-500/5 border border-sky-500/20 rounded-xl p-4">
+                        <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={formData.installNova}
+                            onChange={(e) => setFormData({ ...formData, installNova: e.target.checked })}
+                        />
+                        <span>
+                            <span className="font-semibold text-white block mb-1">Instalar NOVA automáticamente</span>
+                            Tras registrar el nodo Linux, comprobar SSH e instalar el agente de monitorización (solo administradores; requiere Python 3.6+).
+                        </span>
+                    </label>
+                    <div className="flex justify-end">
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl shadow-lg shadow-indigo-500/25 flex items-center gap-2 transition-colors font-medium border border-indigo-500/50 disabled:opacity-50"
+                        >
+                            {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-5 h-5" />}
+                            {loading ? "Guardando..." : "Guardar Servidor"}
+                        </button>
+                    </div>
                 </div>
             </form>
         </div>

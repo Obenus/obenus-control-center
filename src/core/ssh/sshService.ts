@@ -1,52 +1,148 @@
-import { Client, ConnectConfig } from "ssh2";
+import { Client, ConnectConfig, SFTPWrapper } from "ssh2";
 import { decrypt } from "../../lib/encryption";
 import { Server } from "@prisma/client";
 
-export async function executeSSHCommand(server: Server, command: string): Promise<{ stdout: string, stderr: string, code: number }> {
+const DEFAULT_TIMEOUT_MS = 30000;
+/** Tareas de mantenimiento (yum/apt, limpiezas pesadas): el timeout corto corta la ejecución a medias. */
+export const REMOTE_TASK_TIMEOUT_MS = 20 * 60 * 1000;
+
+function buildConfig(server: Server): ConnectConfig {
+    let decryptedCred = "";
+    try {
+        decryptedCred = decrypt(server.credential);
+    } catch {
+        throw new Error("Failed to decrypt server credentials. Cannot connect via SSH.");
+    }
+
+    const config: ConnectConfig = {
+        host: server.ip,
+        port: server.sshPort || 22,
+        username: server.sshUser || "root",
+        readyTimeout: 15000,
+    };
+
+    if (server.authMethod === "PASSWORD") {
+        config.password = decryptedCred;
+    } else {
+        config.privateKey = decryptedCred;
+    }
+
+    return config;
+}
+
+export function withSSHConnection<T>(
+    server: Server,
+    fn: (conn: Client) => Promise<T>,
+    timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<T> {
     return new Promise((resolve, reject) => {
         const conn = new Client();
+        let settled = false;
+        const timer = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                conn.end();
+                reject(new Error(`SSH timeout after ${timeoutMs}ms`));
+            }
+        }, timeoutMs);
 
-        let decryptedCred = "";
-        try {
-            decryptedCred = decrypt(server.credential);
-        } catch (e) {
-            return reject(new Error("Failed to decrypt server credentials. Cannot connect via SSH."));
-        }
-
-        const config: ConnectConfig = {
-            host: server.ip,
-            port: server.sshPort || 22,
-            username: server.sshUser || "root",
-            readyTimeout: 10000,
+        const finish = (err?: Error, value?: T) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            try { conn.end(); } catch { /* ignore */ }
+            if (err) reject(err);
+            else resolve(value as T);
         };
 
-        if (server.authMethod === "PASSWORD") {
-            config.password = decryptedCred;
-        } else {
-            config.privateKey = decryptedCred;
+        try {
+            const config = buildConfig(server);
+            conn.on("ready", () => {
+                fn(conn)
+                    .then((value) => finish(undefined, value))
+                    .catch((err) => finish(err instanceof Error ? err : new Error(String(err))));
+            }).on("error", (err) => {
+                finish(err);
+            }).connect(config);
+        } catch (err) {
+            finish(err instanceof Error ? err : new Error(String(err)));
         }
-
-        conn.on("ready", () => {
-            conn.exec(command, (err, stream) => {
-                if (err) {
-                    conn.end();
-                    return reject(err);
-                }
-
-                let stdout = "";
-                let stderr = "";
-
-                stream.on("close", (code: number, signal: string) => {
-                    conn.end();
-                    resolve({ stdout, stderr, code: code || 0 });
-                }).on("data", (data: Buffer) => {
-                    stdout += data.toString("utf8");
-                }).stderr.on("data", (data: Buffer) => {
-                    stderr += data.toString("utf8");
-                });
-            });
-        }).on("error", (err) => {
-            reject(err);
-        }).connect(config);
     });
+}
+
+export async function executeSSHCommand(
+    server: Server,
+    command: string,
+    options?: { timeoutMs?: number; env?: Record<string, string> }
+): Promise<{ stdout: string; stderr: string; code: number }> {
+    const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    return withSSHConnection(server, (conn) => new Promise((resolve, reject) => {
+        // Never pass secrets via shell interpolation — only via SSH exec env when provided.
+        const onExec = (err: Error | undefined, stream: any) => {
+            if (err) return reject(err);
+
+            let stdout = "";
+            let stderr = "";
+
+            stream.on("close", (code: number) => {
+                resolve({ stdout, stderr, code: code ?? 0 });
+            }).on("data", (data: Buffer) => {
+                stdout += data.toString("utf8");
+            }).stderr.on("data", (data: Buffer) => {
+                stderr += data.toString("utf8");
+            });
+        };
+
+        if (options?.env) {
+            conn.exec(command, { env: options.env }, onExec);
+        } else {
+            conn.exec(command, onExec);
+        }
+    }), timeoutMs);
+}
+
+export async function uploadSSHFile(
+    server: Server,
+    remotePath: string,
+    content: Buffer | string,
+    mode = 0o600,
+    timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<void> {
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
+    await withSSHConnection(server, (conn) => new Promise<void>((resolve, reject) => {
+        conn.sftp((err, sftp: SFTPWrapper) => {
+            if (err) return reject(err);
+            const stream = sftp.createWriteStream(remotePath, { mode });
+            stream.on("close", () => resolve());
+            stream.on("error", (e: Error) => reject(e));
+            stream.end(data);
+        });
+    }), timeoutMs);
+}
+
+export async function downloadSSHFile(
+    server: Server,
+    remotePath: string,
+    timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<Buffer> {
+    return withSSHConnection(server, (conn) => new Promise<Buffer>((resolve, reject) => {
+        conn.sftp((err, sftp: SFTPWrapper) => {
+            if (err) return reject(err);
+            const chunks: Buffer[] = [];
+            const stream = sftp.createReadStream(remotePath);
+            stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+            stream.on("end", () => resolve(Buffer.concat(chunks)));
+            stream.on("error", (e: Error) => reject(e));
+        });
+    }), timeoutMs);
+}
+
+export async function testSSHConnectivity(server: Server): Promise<{ ok: boolean; message: string }> {
+    try {
+        const { stdout, code } = await executeSSHCommand(server, "echo OK && uname -s && python3 --version 2>&1", { timeoutMs: 20000 });
+        if (code !== 0) return { ok: false, message: "SSH conectó pero el comando de prueba falló" };
+        return { ok: true, message: stdout.trim() };
+    } catch (e: any) {
+        return { ok: false, message: e?.message || "Error de conexión SSH" };
+    }
 }

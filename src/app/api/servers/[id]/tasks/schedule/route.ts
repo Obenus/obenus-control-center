@@ -1,106 +1,210 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions, prisma } from "@/lib/auth";
-import { tasksQueue } from "@/lib/queue";
+import { prisma } from "@/lib/auth";
+import { redisConnection, tasksQueue } from "@/lib/queue";
+import { requireServerAccess } from "@/lib/access";
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-    const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
+const CRON_RE = /^(\S+\s+){4}\S+$/;
 
-    try {
-        const { id: serverId } = await params;
-        const { taskName, cron } = await req.json();
-
-        const server = await prisma.server.findUnique({ where: { id: serverId } });
-        if (!server) return new NextResponse("Not Found", { status: 404 });
-
-        if ((session.user as any).role !== "ADMIN" && server.userId !== (session.user as any).id) {
-            return new NextResponse("Unauthorized", { status: 401 });
-        }
-
-        const job = await tasksQueue.add("execute-task", {
-            serverId,
-            userId: (session.user as any).id || "system",
-            taskName
-        }, {
-            repeat: { pattern: cron }
-        });
-
-        // Save metadata to AppConfig
-        const configKey = `SCHEDULES_${serverId}`;
-        const existing = await prisma.appConfig.findUnique({ where: { key: configKey } });
-        let schedules = existing ? JSON.parse(existing.value) : [];
-
-        // Find if BullMQ generated a key for us
-        const repeatables = await tasksQueue.getRepeatableJobs();
-        const createdJob = repeatables.find(j => j.pattern === cron && j.name === "execute-task");
-
-        if (createdJob) {
-            schedules.push({ key: createdJob.key, taskName, cron });
-            await prisma.appConfig.upsert({
-                where: { key: configKey },
-                update: { value: JSON.stringify(schedules) },
-                create: { key: configKey, value: JSON.stringify(schedules) }
-            });
-        }
-
-        return NextResponse.json({ success: true, cron });
-    } catch (e) {
-        return new NextResponse("Internal", { status: 500 });
+async function ensureRedis() {
+    if (redisConnection.status === "wait" || redisConnection.status === "end") {
+        await redisConnection.connect().catch(() => undefined);
     }
 }
 
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-    const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
-    const { id: serverId } = await params;
+/** BullMQ job.id de un repeatable: "repeat:{hash}:{millis}" */
+function repeatableKeyFromJobId(jobId: string | undefined | null): string | null {
+    if (!jobId) return null;
+    const m = String(jobId).match(/^repeat:([^:]+):/);
+    return m?.[1] || null;
+}
 
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
+        const { id: serverId } = await params;
+        const access = await requireServerAccess(serverId);
+        if (access.error) return access.error;
+
+        const { taskName, cron } = await req.json();
+        if (typeof taskName !== "string" || !taskName.trim() || taskName.length > 120) {
+            return NextResponse.json({ error: "Tarea inválida" }, { status: 400 });
+        }
+        if (typeof cron !== "string" || !CRON_RE.test(cron.trim()) || cron.length > 80) {
+            return NextResponse.json({ error: "Expresión cron inválida" }, { status: 400 });
+        }
+
+        await ensureRedis();
+
+        const safeTask = taskName.trim();
+        const safeCron = cron.trim();
+        const repeatJobId = `sched_${serverId}_${safeTask.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80)}`;
+
+        // Quitar programación previa de la misma tarea en este servidor
+        const configKey = `SCHEDULES_${serverId}`;
+        const existing = await prisma.appConfig.findUnique({ where: { key: configKey } });
+        let schedules: any[] = existing ? JSON.parse(existing.value) : [];
+        for (const old of schedules.filter((s) => s.taskName === safeTask)) {
+            try {
+                if (old.key) await tasksQueue.removeRepeatableByKey(old.key);
+            } catch {
+                /* ignore */
+            }
+        }
+        schedules = schedules.filter((s) => s.taskName !== safeTask);
+
+        const job = await tasksQueue.add(
+            "execute-task",
+            {
+                serverId,
+                userId: access.user.id,
+                taskName: safeTask,
+            },
+            {
+                repeat: { pattern: safeCron, jobId: repeatJobId },
+            }
+        );
+
+        let key = repeatableKeyFromJobId(job.id);
+        if (!key) {
+            // Fallback: localizar por jobId / patrón recién creado
+            const repeatables = await tasksQueue.getRepeatableJobs();
+            const created =
+                repeatables.find((j: any) => j.id === repeatJobId) ||
+                repeatables.find(
+                    (j) =>
+                        j.name === "execute-task" &&
+                        j.pattern === safeCron &&
+                        (!schedules.some((s) => s.key === j.key))
+                );
+            key = created?.key || null;
+        }
+
+        if (!key) {
+            return NextResponse.json(
+                { error: "La tarea se encoló pero no se pudo registrar la clave de repetición" },
+                { status: 500 }
+            );
+        }
+
+        const repeatables = await tasksQueue.getRepeatableJobs();
+        const alive = repeatables.find((r) => r.key === key);
+
+        schedules.push({
+            key,
+            taskName: safeTask,
+            cron: safeCron,
+            repeatJobId,
+            serverId,
+        });
+        await prisma.appConfig.upsert({
+            where: { key: configKey },
+            update: { value: JSON.stringify(schedules) },
+            create: { key: configKey, value: JSON.stringify(schedules) },
+        });
+
+        return NextResponse.json({
+            success: true,
+            cron: safeCron,
+            key,
+            next: alive?.next || null,
+        });
+    } catch (e: any) {
+        console.error("Schedule POST error:", e?.message || e);
+        return NextResponse.json({ error: "No se pudo programar la tarea" }, { status: 500 });
+    }
+}
+
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+    try {
+        const { id: serverId } = await params;
+        const access = await requireServerAccess(serverId);
+        if (access.error) return access.error;
+
+        await ensureRedis();
+
         const configKey = `SCHEDULES_${serverId}`;
         const existing = await prisma.appConfig.findUnique({ where: { key: configKey } });
         if (!existing) return NextResponse.json([]);
 
-        let savedSchedules = JSON.parse(existing.value);
+        const savedSchedules = JSON.parse(existing.value);
         const repeatables = await tasksQueue.getRepeatableJobs();
 
-        // Merge with alive BullMQ jobs to get 'next'
-        const merged = savedSchedules.map((saved: any) => {
-            const alive = repeatables.find(r => r.key === saved.key);
-            if (!alive) return null;
-            return {
-                key: saved.key,
-                taskName: saved.taskName,
-                cron: saved.cron,
-                next: alive.next
-            };
-        }).filter(Boolean);
+        const merged = savedSchedules
+            .map((saved: any) => {
+                const alive = repeatables.find((r) => r.key === saved.key);
+                if (!alive) {
+                    // Mostrar igual si está en BD (Redis pudo regenerar keys); intentar por jobId
+                    const byId = saved.repeatJobId
+                        ? repeatables.find((r: any) => r.id === saved.repeatJobId)
+                        : null;
+                    if (!byId) {
+                        return {
+                            key: saved.key,
+                            taskName: saved.taskName,
+                            cron: saved.cron,
+                            next: null,
+                            orphan: true,
+                        };
+                    }
+                    return {
+                        key: byId.key,
+                        taskName: saved.taskName,
+                        cron: saved.cron,
+                        next: byId.next,
+                    };
+                }
+                return {
+                    key: saved.key,
+                    taskName: saved.taskName,
+                    cron: saved.cron,
+                    next: alive.next,
+                };
+            })
+            .filter(Boolean);
 
         return NextResponse.json(merged);
-    } catch (e) {
+    } catch (e: any) {
+        console.error("Schedule GET error:", e?.message || e);
         return NextResponse.json([]);
     }
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-    const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
     try {
         const { id: serverId } = await params;
+        const access = await requireServerAccess(serverId);
+        if (access.error) return access.error;
+
+        await ensureRedis();
+
         const { key } = await req.json();
+        if (typeof key !== "string" || !key || key.length > 500) {
+            return NextResponse.json({ error: "Clave inválida" }, { status: 400 });
+        }
 
-        // Remove from BullMQ
-        await tasksQueue.removeRepeatableByKey(key);
-
-        // Remove from DB
         const configKey = `SCHEDULES_${serverId}`;
         const existing = await prisma.appConfig.findUnique({ where: { key: configKey } });
+        const schedules = existing ? JSON.parse(existing.value) : [];
+        if (!schedules.some((s: any) => s.key === key)) {
+            return NextResponse.json({ error: "Programación no encontrada" }, { status: 404 });
+        }
+
+        try {
+            await tasksQueue.removeRepeatableByKey(key);
+        } catch {
+            /* puede no existir en Redis */
+        }
+
         if (existing) {
-            const schedules = JSON.parse(existing.value).filter((s: any) => s.key !== key);
-            await prisma.appConfig.update({ where: { key: configKey }, data: { value: JSON.stringify(schedules) } });
+            const next = schedules.filter((s: any) => s.key !== key);
+            await prisma.appConfig.update({
+                where: { key: configKey },
+                data: { value: JSON.stringify(next) },
+            });
         }
 
         return NextResponse.json({ success: true });
-    } catch (e) {
-        return new NextResponse("Internal", { status: 500 });
+    } catch (e: any) {
+        console.error("Schedule DELETE error:", e?.message || e);
+        return NextResponse.json({ error: "No se pudo eliminar" }, { status: 500 });
     }
 }

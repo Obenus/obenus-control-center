@@ -28,13 +28,13 @@ export const authOptions: NextAuthOptions = {
                     where: { email: credentials.email.toLowerCase() },
                 });
 
-                if (!user || (!user.isActive)) {
-                    throw new Error("Usuario o contraseña incorrectos");
-                }
+                // Respuesta uniforme ante usuario inexistente/inactivo/clave incorrecta
+                // (mitiga enumeración de cuentas vía timing).
+                const dummyHash = "$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+                const hashToCheck = user?.isActive ? user.passwordHash : dummyHash;
+                const isValid = await bcrypt.compare(credentials.password, hashToCheck);
 
-                const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
-
-                if (!isValid) {
+                if (!user || !user.isActive || !isValid) {
                     throw new Error("Usuario o contraseña incorrectos");
                 }
 

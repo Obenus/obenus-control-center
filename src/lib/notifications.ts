@@ -1,9 +1,10 @@
 import nodemailer from "nodemailer";
 import { prisma } from "./auth";
+import { getNovaConfig } from "./novaConfig";
 
 export async function getNotificationConfig() {
     const configs = await prisma.appConfig.findMany({
-        where: { key: { in: ["SMTP_CONFIG", "TELEGRAM_CONFIG"] } }
+        where: { key: { in: ["SMTP_CONFIG"] } },
     });
 
     let smtp = {
@@ -13,18 +14,21 @@ export async function getNotificationConfig() {
         pass: process.env.SMTP_PASS || "",
         from: process.env.SMTP_FROM || "",
         recipients: "",
-        filters: ["ERROR", "CRITICAL"] // default to errors only
-    };
-
-    let telegram = {
-        token: process.env.TELEGRAM_BOT_TOKEN || "",
-        chatId: process.env.TELEGRAM_CHAT_ID || ""
+        filters: ["ERROR", "CRITICAL"] as string[],
     };
 
     for (const c of configs) {
         if (c.key === "SMTP_CONFIG") smtp = { ...smtp, ...JSON.parse(c.value) };
-        if (c.key === "TELEGRAM_CONFIG") telegram = { ...telegram, ...JSON.parse(c.value) };
     }
+
+    // Un solo bot: el de NOVA (cifrado). Sin formulario Telegram duplicado.
+    const nova = await getNovaConfig();
+    const telegram = {
+        token: nova.botToken || process.env.TELEGRAM_BOT_TOKEN || "",
+        chatId: nova.chatId || process.env.TELEGRAM_CHAT_ID || "",
+        alertsEnabled: nova.alertsEnabled,
+    };
+
     return { smtp, telegram };
 }
 
@@ -52,7 +56,7 @@ export async function sendEmail(subject: string, text: string) {
                       ${text.replace(/\n/g, "<br/>")}
                   </div>
                </div>
-             </div>`
+             </div>`,
         });
         return true;
     } catch (error) {
@@ -64,6 +68,7 @@ export async function sendEmail(subject: string, text: string) {
 export async function sendTelegram(message: string) {
     const { telegram } = await getNotificationConfig();
     if (!telegram.token || !telegram.chatId) return false;
+    if (telegram.alertsEnabled === false) return false;
 
     try {
         const url = `https://api.telegram.org/bot${telegram.token}/sendMessage`;
@@ -73,20 +78,23 @@ export async function sendTelegram(message: string) {
             body: JSON.stringify({
                 chat_id: telegram.chatId,
                 text: `<b>[Obenus Hub]</b>\n${message}`,
-                parse_mode: "HTML"
-            })
+                parse_mode: "HTML",
+            }),
         });
         return response.ok;
     } catch (error) {
-        console.error("Failed to send Telegram message:", error);
+        console.error("Failed to send Telegram message");
         return false;
     }
 }
 
-export async function notifyEvent(subject: string, message: string, type: "SUCCESS" | "ERROR" | "CRITICAL" | "AUDIT" = "SUCCESS") {
+export async function notifyEvent(
+    subject: string,
+    message: string,
+    type: "SUCCESS" | "ERROR" | "CRITICAL" | "AUDIT" = "SUCCESS"
+) {
     const { smtp } = await getNotificationConfig();
 
-    // Validate if this type of email should be sent according to SMTP config
     let shouldSendEmail = true;
     if (smtp.filters) {
         if (type === "SUCCESS" && !smtp.filters.includes("SUCCESS")) shouldSendEmail = false;
@@ -96,7 +104,6 @@ export async function notifyEvent(subject: string, message: string, type: "SUCCE
 
     const promises = [];
     if (shouldSendEmail) promises.push(sendEmail(subject, message));
-
     promises.push(sendTelegram(`<b>${subject}</b>\n<pre>${message}</pre>`));
 
     await Promise.allSettled(promises);
