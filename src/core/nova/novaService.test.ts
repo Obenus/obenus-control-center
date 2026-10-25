@@ -5,33 +5,48 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "crypto";
-import { compareAgentHash, loadOfficialAgent } from "./agentPackage";
+import fs from "fs";
+import path from "path";
+import { compareAgentHash, parseAgentMeta, validateAgentContent } from "./agentPackage";
 import { redactSecrets } from "../../lib/novaConfig";
 import { statusLabel } from "./statusLabel";
 
+const agentPath = path.join(process.cwd(), "obenus-nova.py");
+
 describe("agentPackage", () => {
-    it("carga el agente oficial y calcula SHA-256", () => {
-        const agent = loadOfficialAgent();
-        assert.ok(agent.version);
-        assert.equal(agent.sha256.length, 64);
-        const expected = crypto.createHash("sha256").update(agent.content).digest("hex");
-        assert.equal(agent.sha256, expected);
+    it("valida y calcula SHA-256 del agente en disco", () => {
+        const content = fs.readFileSync(agentPath);
+        const meta = parseAgentMeta(content);
+        assert.ok(meta.version);
+        assert.equal(meta.sha256.length, 64);
+        const expected = crypto.createHash("sha256").update(content).digest("hex");
+        assert.equal(meta.sha256, expected);
+        const v = validateAgentContent(content);
+        assert.equal(v.ok, true);
+    });
+
+    it("rechaza contenido inválido", () => {
+        const bad = validateAgentContent(Buffer.from("print('hi')\n"));
+        assert.equal(bad.ok, false);
     });
 
     it("detecta hash idéntico (servidor actualizado)", () => {
-        const agent = loadOfficialAgent();
-        assert.equal(compareAgentHash(agent.sha256, agent.sha256), true);
+        const content = fs.readFileSync(agentPath);
+        const { sha256 } = parseAgentMeta(content);
+        assert.equal(compareAgentHash(sha256, sha256), true);
     });
 
     it("detecta hash distinto (versión antigua)", () => {
-        const agent = loadOfficialAgent();
-        assert.equal(compareAgentHash("0".repeat(64), agent.sha256), false);
+        const content = fs.readFileSync(agentPath);
+        const { sha256 } = parseAgentMeta(content);
+        assert.equal(compareAgentHash("0".repeat(64), sha256), false);
     });
 
     it("trata ausencia de hash como no instalado", () => {
-        const agent = loadOfficialAgent();
-        assert.equal(compareAgentHash(null, agent.sha256), false);
-        assert.equal(compareAgentHash(undefined, agent.sha256), false);
+        const content = fs.readFileSync(agentPath);
+        const { sha256 } = parseAgentMeta(content);
+        assert.equal(compareAgentHash(null, sha256), false);
+        assert.equal(compareAgentHash(undefined, sha256), false);
     });
 });
 

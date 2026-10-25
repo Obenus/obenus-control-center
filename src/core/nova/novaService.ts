@@ -60,7 +60,7 @@ async function ensureAgentRow(serverId: string) {
 }
 
 export async function probeServerNova(server: Server): Promise<NovaProbeResult> {
-    const official = loadOfficialAgent();
+    const official = await loadOfficialAgent();
     const base: NovaProbeResult = {
         connected: false,
         installStatus: "UNKNOWN",
@@ -429,7 +429,7 @@ export async function runNovaOperation(
             // Still attempt — install requires root; surface clear error from agent if fails
         }
 
-        const official = loadOfficialAgent();
+        const official = await loadOfficialAgent();
         const needsInstall =
             type === "reinstall" ||
             type === "migrate" ||

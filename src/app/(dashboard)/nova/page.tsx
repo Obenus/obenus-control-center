@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
     Activity,
     AlertTriangle,
     CheckCircle2,
     Download,
+    FileUp,
     Loader2,
     Radar,
     RefreshCw,
@@ -45,6 +46,8 @@ type Summary = {
     lastGlobalCheck: string | null;
     officialVersion: string;
     officialSha256: string;
+    officialSource?: string;
+    officialUpdatedAt?: string | null;
 };
 
 const STATUS_STYLE: Record<string, string> = {
@@ -66,6 +69,8 @@ export default function NovaPage() {
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [busy, setBusy] = useState<string | null>(null);
     const [message, setMessage] = useState<string | null>(null);
+    const [uploading, setUploading] = useState(false);
+    const fileRef = useRef<HTMLInputElement | null>(null);
 
     const load = useCallback(async () => {
         const res = await fetch("/api/nova");
@@ -123,6 +128,28 @@ export default function NovaPage() {
         await load();
     };
 
+    const uploadAgent = async (file: File | null) => {
+        if (!file) return;
+        setUploading(true);
+        setMessage(null);
+        const body = new FormData();
+        body.append("file", file);
+        body.append("refreshAfter", "true");
+        const res = await fetch("/api/nova/agent", { method: "POST", body });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            setMessage(data.error || "No se pudo subir el agente");
+        } else {
+            setMessage(data.message || `Versión ${data.version} publicada`);
+            if (data.changed) {
+                // Opcional: ofrecer despliegue
+            }
+        }
+        setUploading(false);
+        if (fileRef.current) fileRef.current.value = "";
+        await load();
+    };
+
     if (loading) {
         return (
             <div className="flex justify-center items-center h-[50vh]">
@@ -147,6 +174,23 @@ export default function NovaPage() {
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                    <input
+                        ref={fileRef}
+                        type="file"
+                        accept=".py,text/x-python,text/plain"
+                        className="hidden"
+                        onChange={(e) => uploadAgent(e.target.files?.[0] || null)}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => fileRef.current?.click()}
+                        disabled={uploading || !!busy}
+                        className="px-4 py-2 rounded-xl bg-emerald-600/80 border border-emerald-400/30 text-sm text-white hover:bg-emerald-500 flex items-center gap-2 disabled:opacity-50"
+                        title="Publicar un nuevo obenus-nova.py como versión oficial"
+                    >
+                        <FileUp className={`w-4 h-4 ${uploading ? "animate-pulse" : ""}`} />
+                        {uploading ? "Subiendo…" : "Subir nueva versión"}
+                    </button>
                     <button
                         onClick={() => runAction("refresh_all")}
                         disabled={!!busy}
@@ -170,6 +214,25 @@ export default function NovaPage() {
                         Configuración Telegram
                     </Link>
                 </div>
+            </div>
+
+            <div className="glass-card rounded-2xl px-4 py-3 text-xs text-slate-400 border border-white/5 flex flex-wrap gap-x-4 gap-y-1">
+                <span>
+                    Oficial: <span className="text-sky-300 font-mono">{summary?.officialVersion}</span>
+                </span>
+                <span className="font-mono text-slate-500">{summary?.officialSha256?.slice(0, 16)}…</span>
+                <span>
+                    Origen:{" "}
+                    <span className="text-slate-300">
+                        {summary?.officialSource === "database" ? "subida en NOVA" : "archivo del sistema"}
+                    </span>
+                </span>
+                {summary?.officialUpdatedAt && (
+                    <span>
+                        Actualizado:{" "}
+                        {new Date(summary.officialUpdatedAt).toLocaleString("es-ES", { timeZone: "Europe/Madrid" })}
+                    </span>
+                )}
             </div>
 
             {message && (

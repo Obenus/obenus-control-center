@@ -13,6 +13,7 @@ services:
       - NODE_ENV=production
     volumes:
       - ./obenus-nova.py:/app/obenus-nova.py:ro
+      - ./agents:/app/agents
     depends_on:
       - postgres
       - redis
@@ -33,6 +34,7 @@ services:
       - NODE_ENV=production
     volumes:
       - ./obenus-nova.py:/app/obenus-nova.py:ro
+      - ./agents:/app/agents
     depends_on:
       - postgres
       - redis

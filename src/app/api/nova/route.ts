@@ -13,7 +13,7 @@ export async function GET() {
     }
 
     try {
-        const official = loadOfficialAgent();
+        const official = await loadOfficialAgent();
         const servers = await prisma.server.findMany({
             orderBy: { name: "asc" },
             include: { novaAgent: true },
@@ -59,6 +59,8 @@ export async function GET() {
                 .sort((a, b) => new Date(b as Date).getTime() - new Date(a as Date).getTime())[0] || null,
             officialVersion: official.version,
             officialSha256: official.sha256,
+            officialSource: official.source,
+            officialUpdatedAt: official.updatedAt || null,
         };
 
         const config = await getNovaConfigPublic();

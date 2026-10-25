@@ -32,8 +32,9 @@ COPY --from=builder /app/public ./public
 # https://nextjs.org/docs/advanced-features/output-file-tracing
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-# Agente oficial NOVA (versión embebida; el volumen de compose puede sobrescribirlo)
+# Agente oficial NOVA (versión embebida; uploads van a BD y opcionalmente a ./agents)
 COPY --from=builder --chown=nextjs:nodejs /app/obenus-nova.py ./obenus-nova.py
+RUN mkdir -p /app/agents && chown nextjs:nodejs /app/agents
 
 USER nextjs
 

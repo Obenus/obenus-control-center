@@ -14,8 +14,9 @@ Gestión centralizada del agente de monitorización **Obenus NOVA** (`obenus-nov
 
 1. **Configuración → NOVA**: token Telegram, Chat ID, umbrales e informe diario. Usar «Probar Telegram».
 2. **Menú NOVA**: tabla de servidores, filtros, instalación/actualización individual o masiva.
-3. **Ficha del servidor → panel NOVA**: diagnóstico, módulos, historial de operaciones.
-4. Al crear un servidor, marcar «Instalar NOVA automáticamente» (solo ADMIN).
+3. **Subir nueva versión**: botón «Subir nueva versión» con un `obenus-nova.py` (valida `VERSION` y modos `--install`/`--run`). Queda como oficial; luego «Comprobar todos» + «Actualización masiva».
+4. **Ficha del servidor → panel NOVA**: diagnóstico, módulos, historial de operaciones.
+5. Al crear un servidor, marcar «Instalar NOVA automáticamente» (solo ADMIN).
 
 ## Arquitectura
 

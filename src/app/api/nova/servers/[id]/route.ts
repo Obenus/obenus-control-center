@@ -28,7 +28,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         return new NextResponse("Unauthorized", { status: 401 });
     }
     // Lectura para owner; mutaciones solo admin en POST
-    const official = loadOfficialAgent();
+    const official = await loadOfficialAgent();
     const a = server.novaAgent;
     return NextResponse.json({
         serverId: server.id,
