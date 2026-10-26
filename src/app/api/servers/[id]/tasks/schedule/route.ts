@@ -123,9 +123,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
         const configKey = `SCHEDULES_${serverId}`;
         const existing = await prisma.appConfig.findUnique({ where: { key: configKey } });
-        if (!existing) return NextResponse.json([]);
-
-        const savedSchedules = JSON.parse(existing.value);
+        const savedSchedules = existing ? JSON.parse(existing.value) : [];
         const repeatables = await tasksQueue.getRepeatableJobs();
 
         const merged = savedSchedules
@@ -161,6 +159,25 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
             })
             .filter(Boolean);
 
+        // Detectar jobs en Redis para este servidor que ya no están en AppConfig (fantasmas)
+        const knownKeys = new Set(merged.map((s: any) => s.key).filter(Boolean));
+        const delayed = await tasksQueue.getJobs(["delayed"], 0, 200);
+        for (const job of delayed) {
+            if (job.name !== "execute-task") continue;
+            if (job.data?.serverId !== serverId) continue;
+            const hash = repeatableKeyFromJobId(job.id);
+            if (!hash || knownKeys.has(hash)) continue;
+            const rep = repeatables.find((r) => r.key === hash);
+            merged.push({
+                key: hash,
+                taskName: job.data?.taskName || job.name,
+                cron: rep?.pattern || "—",
+                next: rep?.next || null,
+                ghost: true,
+            });
+            knownKeys.add(hash);
+        }
+
         return NextResponse.json(merged);
     } catch (e: any) {
         console.error("Schedule GET error:", e?.message || e);
@@ -184,7 +201,20 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
         const configKey = `SCHEDULES_${serverId}`;
         const existing = await prisma.appConfig.findUnique({ where: { key: configKey } });
         const schedules = existing ? JSON.parse(existing.value) : [];
-        if (!schedules.some((s: any) => s.key === key)) {
+        const inConfig = schedules.some((s: any) => s.key === key);
+
+        // Permitir borrar también jobs fantasma (en Redis pero no en AppConfig)
+        let isGhostForServer = false;
+        if (!inConfig) {
+            const delayed = await tasksQueue.getJobs(["delayed"], 0, 200);
+            isGhostForServer = delayed.some(
+                (j) =>
+                    j.name === "execute-task" &&
+                    j.data?.serverId === serverId &&
+                    repeatableKeyFromJobId(j.id) === key
+            );
+        }
+        if (!inConfig && !isGhostForServer) {
             return NextResponse.json({ error: "Programación no encontrada" }, { status: 404 });
         }
 
@@ -194,13 +224,12 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
             /* puede no existir en Redis */
         }
 
-        if (existing) {
-            const next = schedules.filter((s: any) => s.key !== key);
-            await prisma.appConfig.update({
-                where: { key: configKey },
-                data: { value: JSON.stringify(next) },
-            });
-        }
+        const next = schedules.filter((s: any) => s.key !== key);
+        await prisma.appConfig.upsert({
+            where: { key: configKey },
+            update: { value: JSON.stringify(next) },
+            create: { key: configKey, value: JSON.stringify(next) },
+        });
 
         return NextResponse.json({ success: true });
     } catch (e: any) {

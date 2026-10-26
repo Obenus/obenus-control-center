@@ -493,10 +493,34 @@ export default function ServerDetailsPage({ params }: { params: Promise<{ id: st
                             <div className="mt-8 space-y-2">
                                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Rutinas Programadas</h3>
                                 {schedules.map(sch => (
-                                    <div key={sch.key} className="flex items-center justify-between px-4 py-3 bg-indigo-500/5 border border-indigo-500/10 rounded-xl">
+                                    <div
+                                        key={sch.key}
+                                        className={`flex items-center justify-between px-4 py-3 rounded-xl border ${
+                                            sch.ghost || sch.orphan
+                                                ? "bg-amber-500/5 border-amber-500/20"
+                                                : "bg-indigo-500/5 border-indigo-500/10"
+                                        }`}
+                                    >
                                         <div>
-                                            <p className="text-xs font-bold text-indigo-300 tracking-tight">{sch.taskName}</p>
-                                            <p className="text-[10px] font-mono text-slate-500 mt-1">Cron: {sch.cron} • Próximo: {new Date(sch.next).toLocaleString("es-ES", { timeZone: "Europe/Madrid" })}</p>
+                                            <p className={`text-xs font-bold tracking-tight ${sch.ghost || sch.orphan ? "text-amber-300" : "text-indigo-300"}`}>
+                                                {sch.taskName}
+                                                {sch.ghost && (
+                                                    <span className="ml-2 text-[9px] uppercase tracking-wider text-amber-400/90">
+                                                        (fantasma Redis)
+                                                    </span>
+                                                )}
+                                                {sch.orphan && !sch.ghost && (
+                                                    <span className="ml-2 text-[9px] uppercase tracking-wider text-amber-400/90">
+                                                        (huérfana)
+                                                    </span>
+                                                )}
+                                            </p>
+                                            <p className="text-[10px] font-mono text-slate-500 mt-1">
+                                                Cron: {sch.cron}
+                                                {sch.next
+                                                    ? ` • Próximo: ${new Date(sch.next).toLocaleString("es-ES", { timeZone: "Europe/Madrid" })}`
+                                                    : " • Sin próxima ejecución"}
+                                            </p>
                                         </div>
                                         <button onClick={() => deleteSchedule(sch.key)} className="text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 py-1 rounded transition-colors border border-transparent hover:border-red-500/20">Eliminar</button>
                                     </div>
