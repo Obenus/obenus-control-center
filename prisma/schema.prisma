@@ -24,6 +24,21 @@ model User {
   servers         Server[]
   taskLogs        TaskLog[]
   auditLogs       AuditLog[]
+  trustedDevices  TrustedDevice[]
+}
+
+/** Dispositivos de confianza para saltar 2FA (cookie httpOnly, 30 días). */
+model TrustedDevice {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  tokenHash String   @unique
+  label     String?  // user-agent corto
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 enum Role {

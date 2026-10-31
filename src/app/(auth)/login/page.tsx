@@ -10,6 +10,7 @@ export default function LoginPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [totp, setTotp] = useState("");
+    const [rememberDevice, setRememberDevice] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -29,12 +30,26 @@ export default function LoginPage() {
             setError(
                 totp
                     ? "Credenciales o código 2FA incorrectos"
-                    : "Acceso denegado. Si tienes 2FA, introduce el código."
+                    : "Acceso denegado. Si tienes 2FA, introduce el código (salvo dispositivo recordado)."
             );
             setLoading(false);
-        } else {
-            router.push("/dashboard");
+            return;
         }
+
+        // Tras login OK con código 2FA, opcionalmente recordar navegador 30 días
+        if (rememberDevice && totp.trim()) {
+            try {
+                await fetch("/api/account/2fa/trust-device", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ code: totp.trim() }),
+                });
+            } catch {
+                /* no bloquear el acceso */
+            }
+        }
+
+        router.push("/dashboard");
     };
 
     return (
@@ -110,10 +125,22 @@ export default function LoginPage() {
                             />
                         </div>
 
+                        <label className="flex items-start gap-3 cursor-pointer select-none px-1">
+                            <input
+                                type="checkbox"
+                                checked={rememberDevice}
+                                onChange={(e) => setRememberDevice(e.target.checked)}
+                                className="mt-0.5 rounded border-slate-600 bg-transparent"
+                            />
+                            <span className="text-xs text-slate-400 leading-relaxed">
+                                Recordar este dispositivo 30 días (no pedir 2FA en este navegador)
+                            </span>
+                        </label>
+
                         <button
                             type="submit"
                             disabled={loading}
-                            className="relative w-full mt-8 px-4 py-4 rounded-xl overflow-hidden font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-[#050508] disabled:opacity-50 disabled:cursor-not-allowed group"
+                            className="relative w-full mt-4 px-4 py-4 rounded-xl overflow-hidden font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-[#050508] disabled:opacity-50 disabled:cursor-not-allowed group"
                         >
                             <div className="absolute inset-0 bg-gradient-to-r from-sky-500 to-indigo-600 transition-transform duration-700 group-hover:scale-[1.05]" />
                             <span className="relative z-10 flex items-center justify-center text-white tracking-wide font-display font-semibold">

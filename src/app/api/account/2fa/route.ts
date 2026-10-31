@@ -9,6 +9,7 @@ import {
     totpUri,
     verifyTotp,
 } from "@/lib/totp";
+import { revokeAllTrustedDevices } from "@/lib/trustedDevice";
 
 export async function GET() {
     const auth = await requireSession();
@@ -76,6 +77,7 @@ export async function POST(req: Request) {
             where: { id: auth.user.id },
             data: { totpEnabled: false, totpSecretEnc: null },
         });
+        await revokeAllTrustedDevices(auth.user.id);
         await logAudit(auth.user.id, "DISABLE_2FA", "User", auth.user.id, "2FA desactivado");
         return NextResponse.json({ success: true, enabled: false });
     }
