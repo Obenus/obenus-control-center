@@ -58,40 +58,50 @@ export function probeHostKeyFingerprint(
 ): Promise<string> {
     return new Promise((resolve, reject) => {
         const conn = new Client();
+        let settled = false;
+        let seenFp = "";
+
+        const done = (err?: Error, fp?: string) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            try {
+                conn.end();
+            } catch {
+                /* ignore */
+            }
+            if (err) reject(err);
+            else resolve(fp as string);
+        };
+
         const timer = setTimeout(() => {
-            conn.end();
-            reject(new Error("Timeout al leer clave de host"));
+            done(new Error("Timeout al leer clave de host"));
         }, timeoutMs);
 
         conn.on("error", (err) => {
-            clearTimeout(timer);
-            reject(err);
+            // Tras capturar la clave, ssh2 emite "Host denied" o fallo de auth: no es un error real.
+            if (seenFp) {
+                done(undefined, seenFp);
+                return;
+            }
+            done(err instanceof Error ? err : new Error(String(err)));
         })
             .on("ready", () => {
-                clearTimeout(timer);
-                conn.end();
-                reject(new Error("Se conectó sin capturar host key"));
+                // No debería autenticar con credenciales dummy; si llega, ya tenemos fp.
+                if (seenFp) done(undefined, seenFp);
+                else done(new Error("Se conectó sin capturar host key"));
             })
             .connect({
                 host,
                 port,
-                username: "probe",
-                password: "probe",
+                username: "obenus-hostkey-probe",
+                password: "invalid-probe-password",
                 readyTimeout: timeoutMs,
                 tryKeyboard: false,
                 hostVerifier: (key: Buffer) => {
-                    clearTimeout(timer);
-                    const fp = fingerprintFromHostKey(key);
-                    // Rechazar auth a propósito; ya tenemos fingerprint
-                    setImmediate(() => {
-                        try {
-                            conn.end();
-                        } catch {
-                            /* ignore */
-                        }
-                        resolve(fp);
-                    });
-                    return false;
+                    seenFp = fingerprintFromHostKey(key);
+                    // Aceptar la clave para completar el handshake; el auth fallará después.
+                    return true;
                 },
             });
     });
