@@ -9,6 +9,7 @@ export default function LoginPage() {
     const router = useRouter();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [totp, setTotp] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -20,12 +21,16 @@ export default function LoginPage() {
         const res = await signIn("credentials", {
             email,
             password,
+            totp: totp || undefined,
             redirect: false,
         });
 
         if (res?.error) {
-            // Mensaje genérico: no filtrar detalles internos de autenticación
-            setError("Usuario o contraseña incorrectos");
+            setError(
+                totp
+                    ? "Credenciales o código 2FA incorrectos"
+                    : "Acceso denegado. Si tienes 2FA, introduce el código."
+            );
             setLoading(false);
         } else {
             router.push("/dashboard");
@@ -34,7 +39,6 @@ export default function LoginPage() {
 
     return (
         <main className="min-h-screen w-full flex items-center justify-center relative overflow-hidden">
-            {/* Structural ambient shapes */}
             <div className="absolute top-[10%] left-[20%] w-[500px] h-[500px] bg-sky-500/10 rounded-full blur-[120px] pointer-events-none mix-blend-screen" />
             <div className="absolute bottom-[10%] right-[20%] w-[600px] h-[600px] bg-violet-600/10 rounded-full blur-[150px] pointer-events-none mix-blend-screen" />
 
@@ -47,8 +51,12 @@ export default function LoginPage() {
                         </div>
                     </div>
 
-                    <h1 className="font-display text-3xl font-semibold text-transparent bg-clip-text bg-gradient-to-br from-white to-white/60 tracking-tight mb-2">Obenus Control</h1>
-                    <p className="text-sm font-medium text-slate-400/80 mb-8 text-center px-4 leading-relaxed tracking-wide">Infraestructura centralizada de alto rendimiento.</p>
+                    <h1 className="font-display text-3xl font-semibold text-transparent bg-clip-text bg-gradient-to-br from-white to-white/60 tracking-tight mb-2">
+                        Obenus Control
+                    </h1>
+                    <p className="text-sm font-medium text-slate-400/80 mb-8 text-center px-4 leading-relaxed tracking-wide">
+                        Infraestructura centralizada de alto rendimiento.
+                    </p>
 
                     <form onSubmit={handleSubmit} className="w-full space-y-5">
                         {error && (
@@ -59,7 +67,9 @@ export default function LoginPage() {
                         )}
 
                         <div className="space-y-2 group/input">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within/input:text-sky-400">Identidad</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within/input:text-sky-400">
+                                Identidad
+                            </label>
                             <input
                                 type="email"
                                 required
@@ -71,9 +81,9 @@ export default function LoginPage() {
                         </div>
 
                         <div className="space-y-2 group/input">
-                            <div className="flex items-center justify-between ml-1">
-                                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest transition-colors group-focus-within/input:text-sky-400">Código de Acceso</label>
-                            </div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within/input:text-sky-400">
+                                Código de Acceso
+                            </label>
                             <input
                                 type="password"
                                 required
@@ -84,30 +94,34 @@ export default function LoginPage() {
                             />
                         </div>
 
+                        <div className="space-y-2 group/input">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1 transition-colors group-focus-within/input:text-sky-400">
+                                Código 2FA (si está activo)
+                            </label>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                value={totp}
+                                onChange={(e) => setTotp(e.target.value)}
+                                className="w-full px-5 py-3.5 bg-black/20 border border-white/5 rounded-xl focus:outline-none focus:bg-black/40 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/50 transition-all text-white placeholder-slate-700/50 text-sm font-medium tracking-widest text-center"
+                                placeholder="000000"
+                                maxLength={6}
+                            />
+                        </div>
+
                         <button
                             type="submit"
                             disabled={loading}
                             className="relative w-full mt-8 px-4 py-4 rounded-xl overflow-hidden font-medium text-sm transition-all focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-[#050508] disabled:opacity-50 disabled:cursor-not-allowed group"
                         >
                             <div className="absolute inset-0 bg-gradient-to-r from-sky-500 to-indigo-600 transition-transform duration-700 group-hover:scale-[1.05]" />
-                            <div className="absolute inset-0 opacity-0 group-hover:opacity-20 bg-[radial-gradient(circle_at_center,white_0%,transparent_100%)] transition-opacity duration-500" />
                             <span className="relative z-10 flex items-center justify-center text-white tracking-wide font-display font-semibold">
-                                {loading ? (
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                        <span>Verificando Integridad...</span>
-                                    </div>
-                                ) : "Acceder al Sistema"}
+                                {loading ? "Verificando…" : "Acceder al Sistema"}
                             </span>
                         </button>
                     </form>
                 </div>
-
-                <p className="mt-8 text-center text-[10px] text-slate-600 uppercase tracking-widest font-semibold flex items-center justify-center gap-2">
-                    <span>&copy; {new Date().getFullYear()} Obenus Infinity</span>
-                    <span className="w-1 h-1 rounded-full bg-slate-700"></span>
-                    <span className="text-sky-500/70">Level 5 Clearance</span>
-                </p>
             </div>
         </main>
     );

@@ -10,10 +10,17 @@ function getKey(password: string, salt: Buffer): Buffer {
     return crypto.pbkdf2Sync(password, salt, 100000, KEY_LENGTH, "sha512");
 }
 
+function requireAppSecret(): string {
+    const secret = process.env.APP_SECRET_KEY;
+    if (!secret || secret.length < 32) {
+        throw new Error("APP_SECRET_KEY must be set and at least 32 characters");
+    }
+    return secret;
+}
+
 export function encrypt(text: string): string {
     if (!text) return "";
-    const secret = process.env.APP_SECRET_KEY;
-    if (!secret) throw new Error("APP_SECRET_KEY is missing in env");
+    const secret = requireAppSecret();
 
     const salt = crypto.randomBytes(SALT_LENGTH);
     const iv = crypto.randomBytes(IV_LENGTH);
@@ -36,8 +43,7 @@ export function encrypt(text: string): string {
 
 export function decrypt(encryptedText: string): string {
     if (!encryptedText) return "";
-    const secret = process.env.APP_SECRET_KEY;
-    if (!secret) throw new Error("APP_SECRET_KEY is missing in env");
+    const secret = requireAppSecret();
 
     try {
         const rawData = Buffer.from(encryptedText, "base64");

@@ -4,7 +4,7 @@ import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { Server, LayoutDashboard, Settings, LogOut, Loader2, Users, Activity, Command, Menu, X, Radar } from "lucide-react";
+import { Server, LayoutDashboard, Settings, LogOut, Loader2, Users, Activity, Command, Menu, X, Radar, CalendarClock } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     const { data: session, status } = useSession();
@@ -27,6 +27,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { name: "Nodos", href: "/servers", icon: Server },
         { name: "Métricas", href: "/monitoring", icon: Activity },
         ...((session?.user as any)?.role === "ADMIN" ? [{ name: "NOVA", href: "/nova", icon: Radar }] : []),
+        ...((session?.user as any)?.role === "ADMIN" ? [{ name: "Rutinas", href: "/schedules", icon: CalendarClock }] : []),
         ...((session?.user as any)?.role === "ADMIN" ? [{ name: "Identidades", href: "/users", icon: Users }] : []),
         { name: "Configuración", href: "/settings", icon: Settings },
     ];

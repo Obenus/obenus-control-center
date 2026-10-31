@@ -10,9 +10,11 @@ export default withAuth(
         if (
             (path.startsWith("/users") ||
                 path.startsWith("/nova") ||
+                path.startsWith("/schedules") ||
                 path.startsWith("/api/users") ||
                 path.startsWith("/api/nova") ||
-                path.startsWith("/api/settings")) &&
+                path.startsWith("/api/settings") ||
+                path.startsWith("/api/admin")) &&
             role !== "ADMIN"
         ) {
             if (path.startsWith("/api/")) {
@@ -44,6 +46,8 @@ export const config = {
         "/users/:path*",
         "/monitoring/:path*",
         "/nova/:path*",
+        "/schedules/:path*",
+        "/schedules",
         "/api/servers/:path*",
         "/api/servers",
         "/api/tasks/:path*",
@@ -54,5 +58,9 @@ export const config = {
         "/api/settings",
         "/api/nova/:path*",
         "/api/nova",
+        "/api/admin/:path*",
+        "/api/admin",
+        "/api/account/:path*",
+        "/api/account",
     ],
 };

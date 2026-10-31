@@ -11,17 +11,19 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  name         String
-  email        String    @unique
-  passwordHash String
-  role         Role      @default(USER)
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  servers      Server[]
-  taskLogs     TaskLog[]
-  auditLogs    AuditLog[]
+  id              String    @id @default(uuid())
+  name            String
+  email           String    @unique
+  passwordHash    String
+  role            Role      @default(USER)
+  isActive        Boolean   @default(true)
+  totpEnabled     Boolean   @default(false)
+  totpSecretEnc   String?   // AES-GCM encrypted TOTP secret
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  servers         Server[]
+  taskLogs        TaskLog[]
+  auditLogs       AuditLog[]
 }
 
 enum Role {
@@ -42,9 +44,12 @@ model Server {
   sshUser        String    @default("root")
   authMethod     AuthMethod
   credential     String    // Encrypted password or SSH Private Key text
+  /** SHA256 fingerprint of remote host key (ssh-keygen -lf style, base64) */
+  sshHostFingerprint String?
   status         ServerStatus @default(ACTIVE)
   notes          String?
   tags           String?   // JSON stringified array
+  alertsMutedUntil DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   taskLogs       TaskLog[]
@@ -137,10 +142,12 @@ enum ServerStatus {
 
 model RemoteTask {
   id              String   @id @default(uuid())
-  name            String
+  name            String   @unique
   description     String
   commandTemplate String   // SSH bash command
   osTarget        String   // 'all', 'ubuntu', 'debian'
+  /** Si true, notifica también cuando la tarea termina OK (por defecto solo errores). */
+  notifyOnSuccess Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }

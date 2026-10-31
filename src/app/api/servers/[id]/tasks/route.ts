@@ -1,58 +1,61 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions, prisma } from "@/lib/auth";
+import { prisma } from "@/lib/auth";
 import { tasksQueue } from "@/lib/queue";
+import { requireServerAccess } from "@/lib/access";
+import { logAudit } from "@/lib/audit";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-    const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
-
     try {
         const { id: serverId } = await params;
+        const access = await requireServerAccess(serverId);
+        if (access.error) return access.error;
+
         const body = await req.json();
-        const { taskName } = body;
-
-        const server = await prisma.server.findUnique({ where: { id: serverId } });
-        if (!server) return new NextResponse("Not Found", { status: 404 });
-
-        if ((session.user as any).role !== "ADMIN" && server.userId !== (session.user as any).id) {
-            return new NextResponse("Unauthorized", { status: 401 });
+        const taskName = typeof body.taskName === "string" ? body.taskName.trim() : "";
+        if (!taskName || taskName.length > 120) {
+            return NextResponse.json({ error: "Tarea inválida" }, { status: 400 });
         }
 
-        // Queue task instead of running mock
+        const remoteTask = await prisma.remoteTask.findFirst({ where: { name: taskName } });
+        if (!remoteTask) {
+            return NextResponse.json({ error: "Tarea no autorizada" }, { status: 400 });
+        }
+
         const job = await tasksQueue.add("execute-task", {
             serverId,
-            userId: (session.user as any).id,
-            taskName: taskName || "Custom Command"
+            userId: access.user.id,
+            taskName,
         });
 
+        await logAudit(
+            access.user.id,
+            "RUN_TASK",
+            "Server",
+            serverId,
+            taskName,
+            req.headers.get("x-forwarded-for") || undefined
+        );
+
         return NextResponse.json({ jobId: job.id, queued: true });
-    } catch (error) {
+    } catch {
         return new NextResponse("Internal Error", { status: 500 });
     }
 }
 
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-    const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
-
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
     try {
         const { id: serverId } = await params;
-        const server = await prisma.server.findUnique({ where: { id: serverId } });
-        if (!server) return new NextResponse("Not Found", { status: 404 });
-
-        if ((session.user as any).role !== "ADMIN" && server.userId !== (session.user as any).id) {
-            return new NextResponse("Unauthorized", { status: 401 });
-        }
+        const access = await requireServerAccess(serverId);
+        if (access.error) return access.error;
 
         const taskLogs = await prisma.taskLog.findMany({
             where: { serverId },
             orderBy: { startedAt: "desc" },
-            take: 20
+            take: 20,
         });
 
         return NextResponse.json(taskLogs);
-    } catch (error) {
+    } catch {
         return new NextResponse("Internal Error", { status: 500 });
     }
 }

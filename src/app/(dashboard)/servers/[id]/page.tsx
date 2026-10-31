@@ -334,6 +334,7 @@ export default function ServerDetailsPage({ params }: { params: Promise<{ id: st
                 <div className="space-y-6">
                     <ServerConnectionForm
                         server={server}
+                        isAdmin={isAdmin}
                         onSaved={(s) => setServer({ ...server, ...s })}
                     />
 

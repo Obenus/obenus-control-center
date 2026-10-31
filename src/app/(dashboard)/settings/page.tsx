@@ -3,6 +3,7 @@ import { authOptions } from "@/lib/auth";
 import { Shield } from "lucide-react";
 import { SettingsForms } from "./SettingsForms";
 import { NovaSettingsForm } from "./NovaSettingsForm";
+import { TwoFactorForm } from "./TwoFactorForm";
 import { getNotificationConfig } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,8 @@ export default async function SettingsPage() {
             </div>
 
             <SettingsForms initialSmtp={safeSmtp} />
+
+            <TwoFactorForm />
 
             <NovaSettingsForm />
 

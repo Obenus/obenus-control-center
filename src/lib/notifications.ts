@@ -1,27 +1,55 @@
 import nodemailer from "nodemailer";
 import { prisma } from "./auth";
-import { getNovaConfig } from "./novaConfig";
+import { getNovaConfig, redactSecrets } from "./novaConfig";
+import { decrypt, encrypt } from "./encryption";
+import { isAlertMuted } from "./alertMute";
+
+type SmtpConfig = {
+    host: string;
+    port: string;
+    user: string;
+    pass: string;
+    from: string;
+    recipients: string;
+    filters: string[];
+};
+
+function maybeDecryptPass(pass: string): string {
+    if (!pass) return "";
+    // Valores nuevos van cifrados; si falla, asumir legado en claro (migración).
+    try {
+        return decrypt(pass);
+    } catch {
+        return pass;
+    }
+}
+
+export function encryptSmtpPass(pass: string): string {
+    if (!pass) return "";
+    return encrypt(pass);
+}
 
 export async function getNotificationConfig() {
     const configs = await prisma.appConfig.findMany({
         where: { key: { in: ["SMTP_CONFIG"] } },
     });
 
-    let smtp = {
+    let smtp: SmtpConfig = {
         host: process.env.SMTP_HOST || "",
         port: process.env.SMTP_PORT || "587",
         user: process.env.SMTP_USER || "",
         pass: process.env.SMTP_PASS || "",
         from: process.env.SMTP_FROM || "",
         recipients: "",
-        filters: ["ERROR", "CRITICAL"] as string[],
+        filters: ["ERROR", "CRITICAL"],
     };
 
     for (const c of configs) {
         if (c.key === "SMTP_CONFIG") smtp = { ...smtp, ...JSON.parse(c.value) };
     }
 
-    // Un solo bot: el de NOVA (cifrado). Sin formulario Telegram duplicado.
+    smtp.pass = maybeDecryptPass(smtp.pass);
+
     const nova = await getNovaConfig();
     const telegram = {
         token: nova.botToken || process.env.TELEGRAM_BOT_TOKEN || "",
@@ -30,6 +58,14 @@ export async function getNotificationConfig() {
     };
 
     return { smtp, telegram };
+}
+
+function escapeHtml(s: string): string {
+    return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
 }
 
 export async function sendEmail(subject: string, text: string) {
@@ -44,16 +80,17 @@ export async function sendEmail(subject: string, text: string) {
             auth: { user: smtp.user, pass: smtp.pass },
         });
 
+        const safe = escapeHtml(text);
         await transporter.sendMail({
             from: smtp.from || '"Obenus Control Center" <noreply@obenus.local>',
             to: smtp.recipients || process.env.ADMIN_EMAIL || smtp.user,
             subject: `[Obenus Hub] ${subject}`,
-            text: text,
+            text,
             html: `<div style="font-family: sans-serif; padding: 25px; background: #050508; color: #f1f5f9; border-radius: 12px; border: 1px solid #1e293b;">
                <h2 style="color: #38bdf8; margin-top: 0;">Obenus Infinity Alert</h2>
                <div style="background: #0f172a; padding: 15px; border-radius: 8px; border-left: 4px solid #6366f1;">
                   <div style="font-family: monospace; color: #94a3b8; font-size: 14px; margin: 0; line-height: 1.5;">
-                      ${text.replace(/\n/g, "<br/>")}
+                      ${safe.replace(/\n/g, "<br/>")}
                   </div>
                </div>
              </div>`,
@@ -82,7 +119,7 @@ export async function sendTelegram(message: string) {
             }),
         });
         return response.ok;
-    } catch (error) {
+    } catch {
         console.error("Failed to send Telegram message");
         return false;
     }
@@ -91,9 +128,15 @@ export async function sendTelegram(message: string) {
 export async function notifyEvent(
     subject: string,
     message: string,
-    type: "SUCCESS" | "ERROR" | "CRITICAL" | "AUDIT" = "SUCCESS"
+    type: "SUCCESS" | "ERROR" | "CRITICAL" | "AUDIT" = "SUCCESS",
+    opts?: { serverId?: string | null }
 ) {
+    if (await isAlertMuted(opts?.serverId)) {
+        return;
+    }
+
     const { smtp } = await getNotificationConfig();
+    const safeMessage = redactSecrets(message);
 
     let shouldSendEmail = true;
     if (smtp.filters) {
@@ -103,8 +146,10 @@ export async function notifyEvent(
     }
 
     const promises = [];
-    if (shouldSendEmail) promises.push(sendEmail(subject, message));
-    promises.push(sendTelegram(`<b>${subject}</b>\n<pre>${message}</pre>`));
+    if (shouldSendEmail) promises.push(sendEmail(subject, safeMessage));
+    promises.push(
+        sendTelegram(`<b>${escapeHtml(subject)}</b>\n<pre>${escapeHtml(safeMessage)}</pre>`)
+    );
 
     await Promise.allSettled(promises);
 }

@@ -14,11 +14,14 @@ type Props = {
         sshUser: string;
         authMethod: string;
         status: string;
+        sshHostFingerprint?: string | null;
+        alertsMutedUntil?: string | null;
     };
     onSaved?: (server: any) => void;
+    isAdmin?: boolean;
 };
 
-export default function ServerConnectionForm({ server, onSaved }: Props) {
+export default function ServerConnectionForm({ server, onSaved, isAdmin }: Props) {
     const [form, setForm] = useState({
         name: server.name || "",
         hostname: server.hostname || "",
@@ -33,6 +36,9 @@ export default function ServerConnectionForm({ server, onSaved }: Props) {
     const [loading, setLoading] = useState(false);
     const [msg, setMsg] = useState<string | null>(null);
     const [err, setErr] = useState<string | null>(null);
+    const [pendingFp, setPendingFp] = useState<string | null>(null);
+    const [storedFp, setStoredFp] = useState<string | null>(server.sshHostFingerprint || null);
+    const [hostBusy, setHostBusy] = useState(false);
 
     const save = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -219,6 +225,134 @@ export default function ServerConnectionForm({ server, onSaved }: Props) {
                     <Save className="w-4 h-4" />
                     {loading ? "Guardando…" : "Guardar conexión"}
                 </button>
+
+                {isAdmin && (
+                    <div className="pt-4 border-t border-white/5 space-y-3">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
+                            Clave de host SSH (anti-MITM)
+                        </p>
+                        <p className="text-xs text-slate-500">
+                            Guardada:{" "}
+                            <span className="font-mono text-slate-300">
+                                {storedFp || "ninguna — hay que confirmar"}
+                            </span>
+                        </p>
+                        {pendingFp && (
+                            <p className="text-xs text-amber-300 font-mono break-all">
+                                Detectada: {pendingFp}
+                            </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                disabled={hostBusy}
+                                onClick={async () => {
+                                    setHostBusy(true);
+                                    setErr(null);
+                                    const res = await fetch(`/api/servers/${server.id}/host-key`);
+                                    const d = await res.json().catch(() => ({}));
+                                    setHostBusy(false);
+                                    if (!res.ok) {
+                                        setErr(d.error || "No se pudo leer la clave");
+                                        return;
+                                    }
+                                    setPendingFp(d.fingerprint);
+                                    setStoredFp(d.stored);
+                                    setMsg(
+                                        d.confirmed
+                                            ? "Fingerprint coincide con el almacenado"
+                                            : "Confirma el fingerprint si corresponde a este servidor"
+                                    );
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs border border-white/10 text-slate-300"
+                            >
+                                Comprobar fingerprint
+                            </button>
+                            {pendingFp && (
+                                <button
+                                    type="button"
+                                    disabled={hostBusy}
+                                    onClick={async () => {
+                                        if (
+                                            !confirm(
+                                                `¿Confirmar fingerprint?\n${pendingFp}\n\nSolo acepta si verifica el host.`
+                                            )
+                                        )
+                                            return;
+                                        setHostBusy(true);
+                                        const res = await fetch(`/api/servers/${server.id}/host-key`, {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ fingerprint: pendingFp }),
+                                        });
+                                        const d = await res.json().catch(() => ({}));
+                                        setHostBusy(false);
+                                        if (!res.ok) {
+                                            setErr(d.error || "No se pudo confirmar");
+                                            return;
+                                        }
+                                        setStoredFp(d.fingerprint);
+                                        setPendingFp(null);
+                                        setMsg("Fingerprint confirmado");
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg text-xs bg-emerald-600/80 text-white"
+                                >
+                                    Confirmar fingerprint
+                                </button>
+                            )}
+                            {storedFp && (
+                                <button
+                                    type="button"
+                                    disabled={hostBusy}
+                                    onClick={async () => {
+                                        if (!confirm("¿Borrar fingerprint? Se pedirá confirmación de nuevo."))
+                                            return;
+                                        setHostBusy(true);
+                                        await fetch(`/api/servers/${server.id}/host-key`, {
+                                            method: "DELETE",
+                                        });
+                                        setHostBusy(false);
+                                        setStoredFp(null);
+                                        setMsg("Fingerprint borrado");
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg text-xs border border-red-500/30 text-red-300"
+                                >
+                                    Olvidar
+                                </button>
+                            )}
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-2">
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    await fetch(`/api/servers/${server.id}/mute`, {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ hours: 2 }),
+                                    });
+                                    setMsg("Alertas silenciadas 2h en este servidor");
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs border border-amber-500/30 text-amber-300"
+                            >
+                                Mute alertas 2h
+                            </button>
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    await fetch(`/api/servers/${server.id}/mute`, {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ hours: 0 }),
+                                    });
+                                    setMsg("Mute cancelado");
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs border border-white/10 text-slate-400"
+                            >
+                                Quitar mute
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </form>
     );

@@ -1,35 +1,55 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import nodemailer from "nodemailer";
+import { requireAdmin } from "@/lib/access";
+import { getNotificationConfig } from "@/lib/notifications";
 
 export async function POST(req: Request) {
-    const session = await getServerSession(authOptions);
-    if ((session?.user as any)?.role !== "ADMIN") return new NextResponse("Unauthorized", { status: 401 });
+    const admin = await requireAdmin();
+    if (admin.error) return admin.error;
 
     try {
-        const { host, port, user, pass, recipients } = await req.json();
+        const body = await req.json().catch(() => ({}));
+        const cfg = await getNotificationConfig();
+        const host = body.host || cfg.smtp.host;
+        const port = String(body.port || cfg.smtp.port || "587");
+        const user = body.user || cfg.smtp.user;
+        const pass =
+            typeof body.pass === "string" && body.pass.trim() ? body.pass.trim() : cfg.smtp.pass;
+        const recipients = body.recipients || cfg.smtp.recipients;
+
+        if (!host || !user || !pass) {
+            return NextResponse.json(
+                { success: false, log: "Falta host, usuario o contraseña SMTP" },
+                { status: 400 }
+            );
+        }
 
         const transporter = nodemailer.createTransport({
             host,
-            port: parseInt(port || "587", 10),
+            port: parseInt(port, 10),
             secure: port === "465",
             auth: { user, pass },
-            debug: true,
-            logger: true
+            debug: false,
+            logger: false,
         });
 
-        const targetEmail = recipients ? recipients.split(",")[0].trim() : user;
+        const targetEmail = recipients ? String(recipients).split(",")[0].trim() : user;
 
         const info = await transporter.sendMail({
-            from: '"Obenus Hub Test" <' + user + '>',
+            from: `"Obenus Hub Test" <${user}>`,
             to: targetEmail,
             subject: "[Obenus Hub] Prueba de Configuración SMTP",
-            text: "¡Si estás leyendo esto, tu configuración SMTP en Obenus Control Center está funcionando perfectamente!",
+            text: "Si lees esto, SMTP en Obenus Control Center funciona.",
         });
 
-        return NextResponse.json({ success: true, log: `Message sent: ${info.messageId}\nResponse: ${info.response}` });
+        return NextResponse.json({
+            success: true,
+            log: `Message sent: ${info.messageId}`,
+        });
     } catch (e: any) {
-        return NextResponse.json({ success: false, log: e.message || String(e) }, { status: 400 });
+        return NextResponse.json(
+            { success: false, log: e.message || String(e) },
+            { status: 400 }
+        );
     }
 }
