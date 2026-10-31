@@ -231,16 +231,40 @@ export default function ServerConnectionForm({ server, onSaved, isAdmin }: Props
                         <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
                             Clave de host SSH (anti-MITM)
                         </p>
-                        <p className="text-xs text-slate-500">
-                            Guardada:{" "}
-                            <span className="font-mono text-slate-300">
-                                {storedFp || "ninguna — hay que confirmar"}
-                            </span>
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                            Paso 1: «Comprobar» lee la clave del servidor. Paso 2: «Confiar en este
+                            host» la guarda. Sin esto, las tareas SSH no se ejecutan.
                         </p>
+                        <p className="text-xs text-slate-500">
+                            Estado:{" "}
+                            {storedFp ? (
+                                <span className="text-emerald-400 font-medium">Host de confianza</span>
+                            ) : (
+                                <span className="text-amber-400 font-medium">Pendiente de confirmar</span>
+                            )}
+                        </p>
+                        {storedFp && (
+                            <p className="text-[11px] font-mono text-slate-400 break-all">Guardada: {storedFp}</p>
+                        )}
                         {pendingFp && (
-                            <p className="text-xs text-amber-300 font-mono break-all">
-                                Detectada: {pendingFp}
-                            </p>
+                            <div
+                                className={`rounded-xl px-3 py-2.5 border text-xs space-y-1 ${
+                                    storedFp && storedFp !== pendingFp
+                                        ? "bg-red-500/10 border-red-500/30 text-red-200"
+                                        : storedFp && storedFp === pendingFp
+                                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
+                                          : "bg-amber-500/10 border-amber-500/30 text-amber-100"
+                                }`}
+                            >
+                                <p className="font-semibold">
+                                    {storedFp && storedFp !== pendingFp
+                                        ? "⚠ La clave del servidor ha cambiado (posible riesgo). Solo confía si acabas de reinstalar el VPS."
+                                        : storedFp && storedFp === pendingFp
+                                          ? "✓ Correcto: la clave leída coincide con la guardada. No hace falta hacer nada."
+                                          : "✓ Clave leída correctamente. Si es este servidor, pulsa «Confiar en este host»."}
+                                </p>
+                                <p className="font-mono text-[11px] break-all opacity-90">{pendingFp}</p>
+                            </div>
                         )}
                         <div className="flex flex-wrap gap-2">
                             <button
@@ -249,37 +273,34 @@ export default function ServerConnectionForm({ server, onSaved, isAdmin }: Props
                                 onClick={async () => {
                                     setHostBusy(true);
                                     setErr(null);
+                                    setMsg(null);
                                     const res = await fetch(`/api/servers/${server.id}/host-key`);
                                     const d = await res.json().catch(() => ({}));
                                     setHostBusy(false);
                                     if (!res.ok) {
-                                        setErr(d.error || "No se pudo leer la clave");
+                                        setErr(d.error || "No se pudo leer la clave del servidor");
                                         return;
                                     }
                                     setPendingFp(d.fingerprint);
                                     setStoredFp(d.stored);
-                                    setMsg(
-                                        d.confirmed
-                                            ? "Fingerprint coincide con el almacenado"
-                                            : "Confirma el fingerprint si corresponde a este servidor"
-                                    );
                                 }}
                                 className="px-3 py-1.5 rounded-lg text-xs border border-white/10 text-slate-300"
                             >
-                                Comprobar fingerprint
+                                {hostBusy ? "Leyendo…" : "1. Comprobar fingerprint"}
                             </button>
-                            {pendingFp && (
+                            {pendingFp && (!storedFp || storedFp !== pendingFp) && (
                                 <button
                                     type="button"
                                     disabled={hostBusy}
                                     onClick={async () => {
                                         if (
                                             !confirm(
-                                                `¿Confirmar fingerprint?\n${pendingFp}\n\nSolo acepta si verifica el host.`
+                                                `¿Confiar en este host?\n\n${pendingFp}\n\nSolo acepta si estás seguro de que es el servidor correcto.`
                                             )
                                         )
                                             return;
                                         setHostBusy(true);
+                                        setErr(null);
                                         const res = await fetch(`/api/servers/${server.id}/host-key`, {
                                             method: "POST",
                                             headers: { "Content-Type": "application/json" },
@@ -288,16 +309,16 @@ export default function ServerConnectionForm({ server, onSaved, isAdmin }: Props
                                         const d = await res.json().catch(() => ({}));
                                         setHostBusy(false);
                                         if (!res.ok) {
-                                            setErr(d.error || "No se pudo confirmar");
+                                            setErr(d.error || "No se pudo guardar la confianza");
                                             return;
                                         }
                                         setStoredFp(d.fingerprint);
                                         setPendingFp(null);
-                                        setMsg("Fingerprint confirmado");
+                                        setMsg("Host de confianza guardado. SSH ya puede usarse.");
                                     }}
                                     className="px-3 py-1.5 rounded-lg text-xs bg-emerald-600/80 text-white"
                                 >
-                                    Confirmar fingerprint
+                                    2. Confiar en este host
                                 </button>
                             )}
                             {storedFp && (
@@ -305,7 +326,7 @@ export default function ServerConnectionForm({ server, onSaved, isAdmin }: Props
                                     type="button"
                                     disabled={hostBusy}
                                     onClick={async () => {
-                                        if (!confirm("¿Borrar fingerprint? Se pedirá confirmación de nuevo."))
+                                        if (!confirm("¿Olvidar este host? Tendrás que volver a confirmarlo."))
                                             return;
                                         setHostBusy(true);
                                         await fetch(`/api/servers/${server.id}/host-key`, {
@@ -313,11 +334,12 @@ export default function ServerConnectionForm({ server, onSaved, isAdmin }: Props
                                         });
                                         setHostBusy(false);
                                         setStoredFp(null);
-                                        setMsg("Fingerprint borrado");
+                                        setPendingFp(null);
+                                        setMsg("Confianza borrada. Vuelve a comprobar y confirmar.");
                                     }}
                                     className="px-3 py-1.5 rounded-lg text-xs border border-red-500/30 text-red-300"
                                 >
-                                    Olvidar
+                                    Olvidar host
                                 </button>
                             )}
                         </div>
