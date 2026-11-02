@@ -295,20 +295,32 @@ print('OK')
 async function disableLegacyCrons(server: Server, legacyPaths: string[]) {
     const allowed = legacyPaths.filter((p) => LEGACY_CRONS.includes(p));
     if (!allowed.length) return;
+    // cronie (Alma/RHEL) puede seguir ejecutando ficheros *.disabled dentro de /etc/cron.d.
+    // Sacar el legacy a /etc/obenus-monitor/legacy-cron/.
     const script = `
-import os, shutil, time
+import shutil, time
 from pathlib import Path
 paths=${JSON.stringify(allowed)}
 stamp=time.strftime('%Y%m%d-%H%M%S')
+legacy_dir=Path('/etc/obenus-monitor/legacy-cron')
+legacy_dir.mkdir(parents=True, exist_ok=True)
 for p in paths:
   src=Path(p)
   if not src.is_file():
     continue
-  bak=src.with_name(src.name + '.bak-nova-' + stamp)
+  bak=legacy_dir / (src.name + '.bak-nova-' + stamp)
   shutil.copy2(str(src), str(bak))
-  disabled=src.with_name(src.name + '.disabled')
-  src.replace(disabled)
-  print('disabled', p, 'backup', bak)
+  dest=legacy_dir / (src.name + '.disabled')
+  src.replace(dest)
+  print('moved', p, '->', dest, 'backup', bak)
+# También barrer variantes .disabled/.bak que pudieran quedar en cron.d
+for pattern in ('obenus-alertas*', 'obenus-monitor*', 'nova-s3-monitor*'):
+  for path in Path('/etc/cron.d').glob(pattern):
+    if path.name == 'obenus-nova':
+      continue
+    dest=legacy_dir / path.name
+    shutil.move(str(path), str(dest))
+    print('swept', path, '->', dest)
 `;
     const remote = `/tmp/.nova-legacy-${Date.now()}.py`;
     await uploadSSHFile(server, remote, script, 0o700);
